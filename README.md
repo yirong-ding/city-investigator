@@ -4,7 +4,7 @@
 
 Built for the Meta Global AI Developer Hackathon (Oct 26 to Nov 4, 2026).
 
-> **Status:** setup only. Building starts Oct 27, 2026.
+> **Status:** Day 1. Smoke tests for the Meta APIs and NYC data are in [`smoke/`](smoke/README.md).
 
 ## What it does
 
@@ -38,8 +38,13 @@ City Investigator is a research aid, **not an official determination**. For life
 ## Setup
 
 ```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
 cp .env.example .env   # then fill in your keys
+python -m pytest tests # offline checks, no key needed
 ```
+
+Then run the [Day 1 smoke tests](smoke/README.md).
 
 Never commit `.env`; it is listed in `.gitignore`.
 

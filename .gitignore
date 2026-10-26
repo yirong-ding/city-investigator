@@ -20,8 +20,9 @@ dist/
 # Unblurred original photos never leave the machine
 data/private/
 
-# Local caches
+# Local caches and smoke-test output
 .cache/
+smoke/results/
 *.log
 
 # OS and editors

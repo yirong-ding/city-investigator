@@ -1,0 +1,6 @@
+openai>=1.0
+meta-sam-parser>=0.1.0
+pillow>=10
+pillow-heif>=0.16
+requests>=2.31
+pytest>=8

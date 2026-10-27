@@ -12,6 +12,7 @@ dropped, and Muse Spark gets one chance to fix the problems. Flags come from rul
 
 Usage:
   python -m city_investigator.explain latest
+  python -m city_investigator.explain 1306991370360816   # the newest run of this photo
   python -m city_investigator.explain data/private/investigations/<run>
   python -m city_investigator.explain latest --provider open   # Muse Spark Open on Baseten
 """
@@ -666,16 +667,19 @@ def render(explanation: dict[str, Any]) -> str:
 
 
 def find_run(target: str) -> Path:
-    if target == "latest":
-        runs = sorted(path for path in OUTPUT.iterdir() if (path / "result.json").is_file()) if OUTPUT.is_dir() else []
-        if not runs:
-            raise SystemExit(f"No investigations in {OUTPUT}. Run city_investigator.investigate first.")
-        return runs[-1]
+    """'latest', a photo ID or file name (its newest run), or a run folder."""
     path = Path(target)
-    path = path.parent if path.is_file() else path
-    if not (path / "result.json").is_file():
-        raise SystemExit(f"No result.json in {path}.")
-    return path
+    if path.is_dir() or path.is_file():
+        path = path.parent if path.is_file() else path
+        if not (path / "result.json").is_file():
+            raise SystemExit(f"No result.json in {path}.")
+        return path
+    runs = sorted(path for path in OUTPUT.iterdir() if (path / "result.json").is_file()) if OUTPUT.is_dir() else []
+    if target != "latest":
+        runs = [run for run in runs if run.name.endswith("-" + target.replace(".", "_"))]
+    if not runs:
+        raise SystemExit(f"No investigation of {target!r} in {OUTPUT}. Run city_investigator.investigate first.")
+    return runs[-1]
 
 
 def explain_run(run_dir: Path, provider: str = "meta", store: Store | None = None) -> dict[str, Any]:
@@ -696,7 +700,7 @@ def explain_run(run_dir: Path, provider: str = "meta", store: Store | None = Non
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("run", help="'latest' or an investigation folder")
+    parser.add_argument("run", help="'latest', a photo ID or file name, or an investigation folder")
     parser.add_argument(
         "--provider",
         choices=sorted(PROVIDERS),

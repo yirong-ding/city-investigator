@@ -64,6 +64,7 @@ Add `--explain` to the investigate command, or explain a saved run:
 
 ```bash
 python -m city_investigator.explain latest
+python -m city_investigator.explain 1306991370360816         # the newest run of this photo
 python -m city_investigator.explain latest --provider open   # Muse Spark Open on Baseten
 ```
 

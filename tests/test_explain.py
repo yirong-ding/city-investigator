@@ -181,3 +181,16 @@ def test_muse_spark_and_sam_disagreements_are_reported():
         observation("The street looks dry, with no standing water."),  # negated
     ], not_seen)
     assert len(notes) == 1 and "street drains" in notes[0] and "no catch basin" in notes[0]
+
+
+def test_runs_are_found_by_photo_id(tmp_path, monkeypatch):
+    monkeypatch.setattr(ex, "OUTPUT", tmp_path)
+    for name in ("20261027-1-111", "20261027-2-222", "20261027-3-111", "20261027-4-my_photo_jpg"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "result.json").write_text("{}")
+    assert ex.find_run("111").name == "20261027-3-111"
+    assert ex.find_run("latest").name == "20261027-4-my_photo_jpg"
+    assert ex.find_run("my_photo.jpg").name == "20261027-4-my_photo_jpg"
+    assert ex.find_run(str(tmp_path / "20261027-2-222")).name == "20261027-2-222"
+    with pytest.raises(SystemExit):
+        ex.find_run("999")

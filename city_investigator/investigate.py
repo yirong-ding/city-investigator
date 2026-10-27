@@ -22,6 +22,7 @@ import argparse
 import asyncio
 import json
 import os
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -52,6 +53,13 @@ USER_UNCERTAINTY_M = 10.0
 FLOOD_WORDS = ("flood", "water", "rain", "drain", "puddle", "sewer", "catch basin", "storm", "ponding")
 SIDEWALK_WORDS = ("sidewalk", "shed", "scaffold", "blocked", "construction", "obstruct", "wheelchair", "accessib", "walkway")
 STREET_FLOOD_COMPLAINTS = {"street_flooding", "catch_basin", "manhole_overflow"}
+
+# Reports each step as it starts; the terminal prints it, the web page streams it.
+Progress = Callable[[str], None]
+
+
+def say(message: str) -> None:
+    print(f"  {message}", flush=True)
 
 
 def detect_topic(question: str) -> str | None:
@@ -126,7 +134,9 @@ def confirm_place_and_time(photo: Photo, args: argparse.Namespace) -> None:
 # 2 and 3. Privacy and observations
 
 
-async def run_sam(photo: Photo, topic: str, guard: SpendGuard) -> tuple[bytes, int, list[tuple[str, Any]]]:
+async def run_sam(
+    photo: Photo, topic: str, guard: SpendGuard, progress: Progress = say
+) -> tuple[bytes, int, list[tuple[str, Any]]]:
     """Blur faces and plates if needed, then segment the topic's concepts on the blurred photo."""
     price = env_float("SAM_USD_PER_IMAGE", 0.0025)
     jpeg = photo.jpeg
@@ -141,12 +151,16 @@ async def run_sam(photo: Photo, topic: str, guard: SpendGuard) -> tuple[bytes, i
                 guard.record(price)
 
         if not photo.already_blurred:
+            progress("SAM 3.1 is finding faces and license plates to blur")
             boxes = []
             for concept in PRIVACY_CONCEPTS:
                 result = await call(jpeg, concept)
                 boxes += [(r.left, r.top, r.right, r.bottom) for r in result.records if r.kind == "box"]
             jpeg, blurred = blur_regions(jpeg, boxes), len(boxes)
-        results = [(concept, await call(jpeg, concept)) for concept in CONCEPTS[topic]]
+        results = []
+        for concept in CONCEPTS[topic]:
+            progress(f"SAM 3.1 is looking for {concept}")
+            results.append((concept, await call(jpeg, concept)))
     return jpeg, blurred, results
 
 
@@ -327,31 +341,41 @@ def print_report(result: dict[str, Any]) -> None:
         print(f"  [{flag['severity'].upper()}] {flag['type']}: {flag['message']}")
 
 
-async def investigate(args: argparse.Namespace) -> dict[str, Any]:
-    photo = load_input(args.source)
-    confirm_place_and_time(photo, args)
+async def investigate_photo(
+    photo: Photo,
+    question: str,
+    topic: str | None = None,
+    when: datetime | None = None,
+    radius: float | None = None,
+    store: Store | None = None,
+    progress: Progress = say,
+) -> tuple[dict[str, Any], Path]:
+    """Steps 2 to 6 for a photo whose place and time are confirmed: (result, run folder)."""
     assert photo.lat is not None and photo.lon is not None and photo.taken_at is not None
-    topic = args.topic or detect_topic(args.question)
+    topic = topic or detect_topic(question)
     if topic is None:
-        raise SystemExit("Could not tell whether the question is about flooding or a sidewalk. Add --topic.")
-    when = parse_local(args.when) if args.when else photo.taken_at
-    radius = args.radius or RADIUS_M[topic]
+        raise ValueError("Could not tell whether the question is about flooding or a sidewalk; choose a topic.")
+    when = when or photo.taken_at
+    radius = radius or RADIUS_M[topic]
 
     guard = SpendGuard(max_calls=len(PRIVACY_CONCEPTS) + len(CONCEPTS[topic]))
-    jpeg, blurred, results = await run_sam(photo, topic, guard)
+    jpeg, blurred, results = await run_sam(photo, topic, guard, progress)
     observations, not_seen = observations_from(results, photo, topic)
 
-    store = Store.load()
+    progress(f"Gathering public records within {radius:.0f} m, with what each source can and cannot see")
+    store = store or Store.load()
     extra: dict[str, Any] = {}
     if topic == "sidewalk":
         hits, coverage, chains, permits_at_photo = gather_sidewalk(store, photo.lat, photo.lon, radius, when)
         distances = {hit.evidence.id: hit.distance_m for hit in hits if hit.distance_m is not None}
+        progress("Comparing the photo with the permits and complaints")
         flags: list[Flag] = sidewalk_checks(observations, permits_at_photo, chains, when, distances)
         extra["shed_chains"] = [chain.to_dict(times.now()) for chain in chains]
     else:
         hits, coverage, rec, rain_before, sensor_state = gather_flooding(store, photo.lat, photo.lon, radius, when)
         model_state = next((c.state for c in coverage if c.source == "City stormwater flood maps"), None)
         peak = store.rain_peak(when - timedelta(hours=24), when + timedelta(hours=72))
+        progress("Comparing the photo, sensors, complaints, rain and the city's flood model")
         flags = flood_checks(
             observations, [hit.evidence for hit in hits], rain_before, sensor_state, photo.taken_at, when, model_state,
             peak[1] if peak else None,
@@ -366,7 +390,7 @@ async def investigate(args: argparse.Namespace) -> dict[str, Any]:
     (run_dir / "photo.jpg").write_bytes(jpeg)
     (run_dir / "overlay.png").write_bytes(draw_overlay(jpeg, results))
     result = {
-        "question": args.question,
+        "question": question,
         "topic": topic,
         "question_moment": times.to_local(when).strftime("%Y-%m-%d %H:%M"),
         "radius_m": radius,
@@ -381,12 +405,25 @@ async def investigate(args: argparse.Namespace) -> dict[str, Any]:
         "estimated_spend_today_usd": round(guard.spent_today(), 4),
     }
     (run_dir / "result.json").write_text(json.dumps(result, indent=2))
+    return result, run_dir
+
+
+async def investigate(args: argparse.Namespace) -> dict[str, Any]:
+    photo = load_input(args.source)
+    confirm_place_and_time(photo, args)
+    store = Store.load()
+    when = parse_local(args.when) if args.when else None
+    try:
+        result, run_dir = await investigate_photo(photo, args.question, args.topic, when, args.radius, store)
+    except ValueError as error:
+        raise SystemExit(f"{error} Add --topic.") from error
     print_report(result)
     print(f"\nSaved to {run_dir}")
     if args.explain:
-        from city_investigator.explain import explain_run  # explain imports this module
+        from city_investigator.explain import explain_run, print_explanation  # explain imports this module
 
-        explain_run(run_dir, args.provider, store)
+        print(f"\nAsking Muse Spark ({args.provider}) to explain {run_dir.name} ...")
+        print_explanation(explain_run(run_dir, args.provider, store), run_dir)
     return result
 
 

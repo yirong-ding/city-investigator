@@ -35,7 +35,7 @@ from typing import Any
 from city_investigator import times
 from city_investigator.config import DROPPED_FIELDS, RAIN_STATION
 from city_investigator.evidence import Evidence
-from city_investigator.investigate import MIN_CONFIDENCE, OUTPUT
+from city_investigator.investigate import MIN_CONFIDENCE, OUTPUT, Progress, say
 from city_investigator.meta import (
     PROVIDERS,
     SpendCapError,
@@ -247,7 +247,7 @@ def evidence_item(record: dict[str, Any]) -> dict[str, Any]:
         item["date"] = record["start"]["local"]
     if record.get("end"):
         item["until"] = record["end"]["local"]
-    for key in ("address", "distance_m", "bin", "bbl", "url"):
+    for key in ("address", "distance_m", "bin", "bbl", "url", "lat", "lon"):
         if record.get(key) not in (None, ""):
             item[key] = record[key]
     return item
@@ -265,7 +265,8 @@ def not_seen_item(concept: str) -> dict[str, Any]:
 
 
 def for_model(item: dict[str, Any]) -> dict[str, Any]:
-    return {key: value for key, value in item.items() if key != "url"}
+    """Links and coordinates are for the page, not the model."""
+    return {key: value for key, value in item.items() if key not in ("url", "lat", "lon")}
 
 
 def chain_summary(chain: dict[str, Any]) -> str:
@@ -410,6 +411,26 @@ def segment_now(jpeg: bytes, concept: str) -> Any:
     """One SAM 3.1 request from synchronous code, even when called inside a running event loop."""
     with ThreadPoolExecutor(max_workers=1) as pool:
         return pool.submit(asyncio.run, _segment_once(jpeg, concept)).result()
+
+
+def describe_call(name: str, arguments: str) -> str:
+    """A tool call in plain words, for the progress shown while Muse Spark works."""
+    try:
+        args = json.loads(arguments or "{}")
+    except ValueError:
+        args = {}
+    if name == "check_photo":
+        return f'Muse Spark asks SAM 3.1 to find "{args.get("concept")}" in the photo'
+    if name == "get_record":
+        return f"Muse Spark reads record {args.get('evidence_id')}"
+    if name == "search_records":
+        return (
+            f"Muse Spark searches {args.get('topic')} records from {args.get('start_date')} to "
+            f"{args.get('end_date')} within {args.get('radius_m')} m"
+        )
+    if name == "building_records":
+        return f"Muse Spark reads every record filed for building {args.get('building_id')}"
+    return f"Muse Spark calls {name}"
 
 
 def outcome(output: dict[str, Any]) -> str:
@@ -661,6 +682,7 @@ def explain(
     client: Any = None,
     store: Store | None = None,
     segmenter: Callable[[bytes, str], Any] | None = None,
+    progress: Progress = say,
 ) -> dict[str, Any]:
     if client is None:
         client, model, price_prefix = chat_client(provider)
@@ -689,6 +711,7 @@ def explain(
     messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": content}]
 
     # 1. Tools without the schema: Muse Spark Open ignores the schema when tools are in the request.
+    progress(f"Muse Spark ({model}) is reading the photo and {len(known)} pieces of evidence")
     for _ in range(MAX_TOOL_TURNS):
         message = call(messages, tools=toolbox.tools, tool_choice="auto")
         if not message.tool_calls:
@@ -696,19 +719,22 @@ def explain(
             break
         messages.append(message.model_dump(exclude_none=True))
         for tool_call in message.tool_calls:
-            print(f"  Muse Spark looked up {tool_call.function.name} {tool_call.function.arguments}")
+            progress(describe_call(tool_call.function.name, tool_call.function.arguments))
             output = toolbox.run(tool_call.function.name, tool_call.function.arguments)
             messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": json.dumps(output, default=str)})
 
     # 2. The same answer as claims under the strict schema, in a call without tools.
     messages.append({"role": "user", "content": REWRITE})
+    progress("Muse Spark is writing its answer as labeled claims")
     answer = call(messages, response_format=CLAIMS_FORMAT).content or ""
     kept, dropped, warnings = check_claims(answer, known, required)
+    progress(f"Checking every claim against its evidence: {len(kept)} passed, {len(dropped)} removed")
 
     # 3. One chance to fix what the checks found.
     repairs = 0
     while (dropped or warnings) and repairs < MAX_REPAIRS:
         repairs += 1
+        progress(f"Muse Spark is fixing {len(dropped) + len(warnings)} problem(s) the checks found")
         messages += [
             {"role": "assistant", "content": answer},
             {"role": "user", "content": repair_prompt(dropped, warnings)},
@@ -814,20 +840,24 @@ def find_run(target: str) -> Path:
     return runs[-1]
 
 
-def explain_run(run_dir: Path, provider: str = "meta", store: Store | None = None) -> dict[str, Any]:
+def explain_run(
+    run_dir: Path, provider: str = "meta", store: Store | None = None, progress: Progress = say
+) -> dict[str, Any]:
+    """Explain a saved investigation and save explanation.json and explanation.md next to it."""
     result = json.loads((run_dir / "result.json").read_text())
     photo = run_dir / "photo.jpg"
-    print(f"\nAsking Muse Spark ({provider}) to explain {run_dir.name} ...")
-    explanation = explain(result, photo.read_bytes() if photo.is_file() else None, provider, store=store)
-    report = render(explanation)
+    explanation = explain(result, photo.read_bytes() if photo.is_file() else None, provider, store=store, progress=progress)
     (run_dir / "explanation.json").write_text(json.dumps(explanation, indent=2))
-    (run_dir / "explanation.md").write_text(report, encoding="utf-8")
-    print("\n" + report)
+    (run_dir / "explanation.md").write_text(render(explanation), encoding="utf-8")
+    return explanation
+
+
+def print_explanation(explanation: dict[str, Any], run_dir: Path) -> None:
+    print("\n" + render(explanation))
     print(
         f"Saved to {run_dir / 'explanation.md'} ({explanation['seconds']}s; "
         f"estimated spend today ${explanation['estimated_spend_today_usd']:.2f})"
     )
-    return explanation
 
 
 def main() -> None:
@@ -841,8 +871,10 @@ def main() -> None:
     )
     args = parser.parse_args()
     load_env()
+    run_dir = find_run(args.run)
+    print(f"\nAsking Muse Spark ({args.provider}) to explain {run_dir.name} ...")
     try:
-        explain_run(find_run(args.run), args.provider)
+        print_explanation(explain_run(run_dir, args.provider), run_dir)
     except SpendCapError as error:
         raise SystemExit(str(error)) from error
 

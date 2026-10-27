@@ -20,7 +20,7 @@ def sidewalk_result(store, tmp_path, monkeypatch):  # noqa: F811
     """A whole offline investigation of the made-up shed, as saved in result.json."""
     taken = times.local_day_start(datetime(2026, 2, 10).date())
 
-    async def fake_sam(photo, topic, guard):
+    async def fake_sam(photo, topic, guard, progress=None):
         return photo.jpeg, 0, [("scaffolding", sam_result(BOX_LINE)), ("construction fence", sam_result())]
 
     monkeypatch.setattr(inv, "load_input", lambda source: photo_at(*SHED, taken))

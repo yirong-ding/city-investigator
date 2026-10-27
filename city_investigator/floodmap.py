@@ -11,6 +11,7 @@ is accurate to well under a meter across one community district.
 
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import dataclass
 from typing import Any
@@ -67,6 +68,27 @@ class FloodMap:
         """Meters from the point to each flooding category (0 inside it)."""
         point = to_meters(Point(lon, lat))
         return {category: float(shapely.distance(geometry, point)) for category, geometry in self.layers.items()}
+
+    def around(self, lat: float, lon: float, half_m: float) -> list[dict[str, Any]]:
+        """GeoJSON features of the modeled flooding in a square around the point, for the map."""
+        center = to_meters(Point(lon, lat))
+        features = []
+        for category, geometry in sorted(self.layers.items()):
+            clipped = shapely.clip_by_rect(geometry, center.x - half_m, center.y - half_m, center.x + half_m, center.y + half_m)
+            if clipped.is_empty:
+                continue
+            features.append({
+                "type": "Feature",
+                "geometry": json.loads(shapely.to_geojson(to_degrees(clipped))),
+                "properties": {
+                    "id": f"stormwater:{self.key}",
+                    "scenario": self.key,
+                    "category": category,
+                    "label": STORMWATER_CATEGORIES.get(category, f"flooding category {category}"),
+                    "title": self.title,
+                },
+            })
+        return features
 
     def evidence(self, lat: float, lon: float, radius_m: float) -> Evidence | None:
         near = {category: distance for category, distance in self.distances(lat, lon).items() if distance <= radius_m}

@@ -146,7 +146,7 @@ def test_flood_recurrence_counts_each_source(store):  # noqa: F811
 def test_whole_investigation_runs_offline(store, tmp_path, monkeypatch):  # noqa: F811
     taken = times.local_day_start(datetime(2026, 2, 10).date())
 
-    async def fake_sam(photo, topic, guard):
+    async def fake_sam(photo, topic, guard, progress=None):
         return photo.jpeg, 0, [("scaffolding", sam_result(BOX_LINE)), ("construction fence", sam_result())]
 
     monkeypatch.setattr(inv, "load_input", lambda source: photo_at(*SHED, taken))

@@ -4,7 +4,7 @@
 
 Built for the Meta Global AI Developer Hackathon (Oct 26 to Nov 4, 2026).
 
-> **Status:** Day 4. One command runs a whole investigation in the terminal, and Muse Spark writes the labeled, cited explanation. The Day 1 and 2 findings, including the chosen demo sites, are in [`smoke/FINDINGS.md`](smoke/FINDINGS.md).
+> **Status:** Day 5. A web page runs the whole investigation and streams each step; every claim in the answer links to its evidence on a map and a timeline. Findings so far are in [`smoke/FINDINGS.md`](smoke/FINDINGS.md).
 
 ## What it does
 
@@ -47,6 +47,20 @@ python -m pytest tests # offline checks, no key needed
 ```
 
 Then run the [Day 1 smoke tests](smoke/README.md).
+
+## Web page
+
+```bash
+python -m city_investigator.web   # opens http://127.0.0.1:8000
+```
+
+1. **Photo:** pick one of the three demos, type a Mapillary photo ID, or upload your own photo.
+2. **Place and time:** drag the pin if it is off (or click the map when the photo has no location). The confirmed pin is what the records are matched to.
+3. **Question:** ask, choose Muse Spark 1.3 or Muse Spark Open, and press Investigate.
+
+Each step streams in as it happens: SAM 3.1 looking for each object, the records gathered, the checks, and every lookup Muse Spark makes. The map and timeline fill in as soon as the records are gathered; the answer follows. Hover a claim to light up the evidence it cites on the map and the timeline; click a citation to jump to it. The map shades the city's flood model around the pin, with today's and 2050 sea levels.
+
+Saved investigations open from the list at the top without any API calls. The page runs on this computer only, with the same keys, snapshots and spend cap as the command line.
 
 ## Investigate
 

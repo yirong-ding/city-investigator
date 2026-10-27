@@ -12,9 +12,14 @@ Results from running the smoke tests on Oct 27, 2026. Counts come straight from 
 | 3 image + strict schema | PASS, 4.1 s | PASS, 9.7 s |
 | 4 image + tools + strict schema | PASS, 8.1 s | **FAIL**: final answer was not JSON (22.9 s) |
 | 5 text + tools + strict schema | PASS, 6.9 s | **FAIL**: final answer was not JSON (6.6 s) |
+| 6 image + tools, then strict schema in a separate call | not run | **PASS**, 29.9 s (after keeping the text answer and asking for a rewrite) |
 
 - **Muse Spark 1.3 does everything in one request.** It is the main path.
-- **Muse Spark Open takes images, tools and the schema, but ignores the schema when tools are in the same request.** Step 6 tests the workaround: run the tool loop first, then ask for the schema in a separate call without tools. It is also 2 to 3 times slower.
+- **Muse Spark Open takes images, tools and the schema, but ignores the schema when tools are in the same request.** Steps 4 and 5 returned a good plain-text answer instead of JSON.
+- **Workaround that passes (step 6):** run the tool loop, keep the model's text answer, then ask in a separate call without tools for that answer rewritten as claims. The first version, which dropped the text answer, returned an empty claims list.
+- **Speed:** the open model is 2 to 3 times slower (about 30 s for step 6, versus about 8 s for Muse Spark 1.3 doing it in one request).
+
+**Decision:** the agent uses the split pattern for both providers, so the model is one setting. Muse Spark Open qualifies the project for the open-weights prize; hosted Muse Spark 1.3 is the faster fallback.
 
 **SAM 3.1 (hosted)** works with confidence scores: on the test photo it found 3 cars (0.84, 0.63, 0.56) and returned valid empty results for standing water, scaffolding and catch basin. No box fell outside the photo, so orientation handling is right.
 

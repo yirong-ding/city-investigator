@@ -426,6 +426,13 @@ def test_flood_model_reports_each_category_by_distance(store):
 MOCEJ = "https://services6.arcgis.com/yG5s3afENB5iO9fj/arcgis/rest/services"
 
 
+def bowtie(lat, lon, half_m):
+    """A polygon whose outline crosses itself at the center."""
+    dlat, dlon = half_m / 110_574, half_m / (111_320 * math.cos(math.radians(40.675)))
+    ring = [[lon - dlon, lat - dlat], [lon + dlon, lat + dlat], [lon + dlon, lat - dlat], [lon - dlon, lat + dlat]]
+    return {"type": "Polygon", "coordinates": [ring + ring[:1]]}
+
+
 def feature(category, polygon):
     return {"type": "Feature", "properties": {"OBJECTID": 1, "Flooding_Category": category}, "geometry": polygon}
 
@@ -463,6 +470,8 @@ def test_flood_maps_come_from_the_climate_office_layers(tmp_path):
         ],
         "NYC_Stormwater_Flood_Map___Extreme_Flood_with_2080_Sea_Level_Rise": [
             feature("3 - Future High Tides 2080", square(*CORNER, 40)),
+            feature(1, bowtie(*CORNER, 20)),  # crosses itself, like some city polygons
+            feature(1, square(*CORNER, 5)),
         ],
     })
     payload = snapshot.fetch_stormwater(tmp_path, server)
@@ -475,8 +484,11 @@ def test_flood_maps_come_from_the_climate_office_layers(tmp_path):
     merged = shapely.geometry.shape(deep["geometry"])
     assert merged.geom_type == "Polygon"  # the two overlapping squares became one
     assert merged.bounds[1] == pytest.approx(CORNER[0] - 10 / 110_574, abs=1e-6)
-    assert scenarios["extreme_2080"]["features"][0]["category"] == 3
-    assert len(server.queries) == 3  # two pages, then one
+    nuisance, tides = scenarios["extreme_2080"]["features"]
+    assert (nuisance["category"], tides["category"]) == (1, 3)
+    repaired = shapely.geometry.shape(nuisance["geometry"])
+    assert repaired.is_valid and repaired.area > 0
+    assert len(server.queries) == 4  # two pages for each layer
     assert payload["publisher"]["account"] == "mocej.nyc.data"
 
 

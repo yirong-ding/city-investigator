@@ -223,16 +223,18 @@ def stormwater_features(session: requests.Session, layer: str, bounds: tuple[flo
             category = flood_category(feature.get("properties") or {})
             if category is None or not feature.get("geometry"):
                 continue
-            clipped = shapely.clip_by_rect(shape(feature["geometry"]), west, south, east, north)
-            if not clipped.is_empty:
-                parts.setdefault(category, []).append(clipped)
+            # City polygons can cross themselves; repair the clipped piece before merging.
+            clipped = shapely.make_valid(shapely.clip_by_rect(shape(feature["geometry"]), west, south, east, north))
+            polygons = [part for part in shapely.get_parts(clipped) if part.geom_type in ("Polygon", "MultiPolygon")]
+            parts.setdefault(category, []).extend(polygons)
         more = page.get("exceededTransferLimit") or (page.get("properties") or {}).get("exceededTransferLimit")
         if not features or not more:
             break
         offset += len(features)
     merged = {
-        category: shapely.transform(shapely.union_all(pieces), lambda xy: np.round(xy, 6))
+        category: shapely.make_valid(shapely.transform(shapely.union_all(pieces), lambda xy: np.round(xy, 6)))
         for category, pieces in parts.items()
+        if pieces
     }
     return [{"category": category, "geometry": json.loads(shapely.to_geojson(geometry))} for category, geometry in sorted(merged.items())]
 

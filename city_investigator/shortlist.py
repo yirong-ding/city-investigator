@@ -87,19 +87,34 @@ def flood_sites(store: Store, top: int) -> list[dict[str, Any]]:
     return sites[:top]
 
 
+def best_photos(photos: list[dict[str, Any]], site: dict[str, Any], keep: int = 5) -> list[dict[str, Any]]:
+    """Photos most likely to show the site: facing it and close.
+
+    For a shed: the closest taken while the permits were valid, plus the closest from
+    before (a "what has changed" pair). For a flood corner: the newest, closest first.
+    """
+    photos = [photo | {"when": photo_period(photo, site)} for photo in photos]
+    facing = [photo for photo in photos if photo["faces_site"]]
+    pool = facing or photos
+    if site.get("up_since"):
+        during = sorted((p for p in pool if p["when"] == "while shed permits were valid"), key=lambda p: p["distance_m"])
+        before = sorted((p for p in pool if p["when"] == "before the current shed permits"), key=lambda p: p["distance_m"])
+        return during[: keep - 1] + before[:1] if during else before[:keep]
+    return sorted(pool, key=lambda p: (p["captured_at"] or "", -p["distance_m"]), reverse=True)[:keep]
+
+
 def add_photos(sites: list[dict[str, Any]], keep: int = 5) -> None:
-    """Keep the newest photos plus the oldest one, which often shows the street before."""
     for site in sites:
         try:
             photos = photos_near(site["lat"], site["lon"], PHOTO_RADIUS_M)
         except Exception as error:  # one failed search should not stop the shortlist
             site["photos_error"] = f"{type(error).__name__}: {error}"[:300]
             continue
-        chosen = photos[: keep - 1] + photos[-1:] if len(photos) > keep else photos
         years = sorted({(photo["captured_at"] or "")[:4] for photo in photos if photo["captured_at"]})
         site["photo_count"] = len(photos)
+        site["facing_count"] = sum(1 for photo in photos if photo["faces_site"])
         site["photo_years"] = f"{years[0]} to {years[-1]}" if years else None
-        site["photos"] = [photo | {"when": photo_period(photo, site)} for photo in chosen]
+        site["photos"] = best_photos(photos, site, keep)
 
 
 def photo_period(photo: dict[str, Any], site: dict[str, Any]) -> str | None:
@@ -122,9 +137,13 @@ def photo_lines(site: dict[str, Any]) -> list[str]:
         return []
     if not site["photos"]:
         return [f"  - No Mapillary photos within {PHOTO_RADIUS_M} m."]
-    lines = [f"  - {site['photo_count']} photos within {PHOTO_RADIUS_M} m, taken {site['photo_years']}; newest and oldest:"]
+    lines = [
+        f"  - {site['photo_count']} photos within {PHOTO_RADIUS_M} m ({site['facing_count']} facing the site), "
+        f"taken {site['photo_years']}; best candidates:"
+    ]
     for photo in site["photos"]:
-        when = f", {photo['when']}" if photo.get("when") else ""
+        facing = {True: ", facing the site", False: ", facing away", None: ""}[photo.get("faces_site")]
+        when = (f", {photo['when']}" if photo.get("when") else "") + facing
         lines.append(
             f"  - [{(photo['captured_at'] or 'undated')[:10]}, {photo['distance_m']} m away{when}]({photo['page_url']}): {photo['credit']}"
         )

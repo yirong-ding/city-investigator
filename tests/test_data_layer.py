@@ -303,3 +303,33 @@ def test_photo_search_reports_errors_instead_of_no_photos():
     session = FakeSession([{"error": {"message": "rate limit"}}])
     with pytest.raises(RuntimeError, match="Mapillary error"):
         photos.photos_near(*CORNER, token="t", session=session)
+
+
+def test_photo_facing_uses_camera_direction():
+    north_of_site = {"id": "a", "computed_geometry": {"coordinates": [CORNER[1], CORNER[0] + 0.0002]}}
+    looking_south = parse_photo(north_of_site | {"compass_angle": 180}, *CORNER)
+    looking_north = parse_photo(north_of_site | {"compass_angle": 0}, *CORNER)
+    panorama = parse_photo(north_of_site | {"compass_angle": 0, "is_pano": True}, *CORNER)
+    assert looking_south["faces_site"] is True
+    assert looking_north["faces_site"] is False
+    assert panorama["faces_site"] is True
+
+
+def test_best_photos_prefers_close_facing_photos_during_permits():
+    from city_investigator.shortlist import best_photos
+
+    site = {"up_since": "2022-07-14", "permit_valid_until": "2026-12-31"}
+
+    def photo(pid, taken, distance, faces):
+        return {"id": pid, "captured_at": f"{taken}T12:00:00+00:00", "distance_m": distance, "faces_site": faces}
+
+    chosen = best_photos(
+        [
+            photo("far-during", "2025-03-30", 35, True),
+            photo("near-during", "2025-03-30", 8, True),
+            photo("away-during", "2025-03-30", 5, False),
+            photo("before", "2018-08-26", 20, True),
+        ],
+        site,
+    )
+    assert [p["id"] for p in chosen] == ["near-during", "far-during", "before"]

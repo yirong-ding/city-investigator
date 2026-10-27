@@ -16,6 +16,20 @@ def distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 2 * EARTH_RADIUS_M * math.asin(math.sqrt(a))
 
 
+def bearing_deg(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Compass bearing from the first point to the second, 0 to 360 degrees."""
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dlmb = math.radians(lon2 - lon1)
+    x = math.sin(dlmb) * math.cos(phi2)
+    y = math.cos(phi1) * math.sin(phi2) - math.sin(phi1) * math.cos(phi2) * math.cos(dlmb)
+    return math.degrees(math.atan2(x, y)) % 360
+
+
+def angle_between(a: float, b: float) -> float:
+    """Smallest difference between two compass directions, 0 to 180 degrees."""
+    return abs((a - b + 180) % 360 - 180)
+
+
 def bbox(lat: float, lon: float, radius_m: float) -> tuple[float, float, float, float]:
     """(min_lon, min_lat, max_lon, max_lat) around a point."""
     dlat = math.degrees(radius_m / EARTH_RADIUS_M)

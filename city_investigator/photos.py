@@ -13,10 +13,12 @@ from typing import Any
 
 import requests
 
-from city_investigator.geo import bbox, distance_m
+from city_investigator.geo import angle_between, bbox, bearing_deg, distance_m
 
 API = "https://graph.mapillary.com/images"
-FIELDS = "id,captured_at,computed_geometry,geometry,compass_angle,thumb_1024_url,creator"
+FIELDS = "id,captured_at,computed_geometry,geometry,compass_angle,computed_compass_angle,is_pano,thumb_1024_url,creator"
+# A camera pointing within this many degrees of the site counts as facing it.
+FACING_TOLERANCE_DEG = 45
 LICENSE = "CC BY-SA 4.0"
 
 
@@ -31,13 +33,24 @@ def parse_photo(item: dict[str, Any], lat: float, lon: float) -> dict[str, Any] 
         datetime.fromtimestamp(captured / 1000, timezone.utc).isoformat() if isinstance(captured, (int, float)) else None
     )
     creator = (item.get("creator") or {}).get("username") or "a Mapillary contributor"
+    heading = item.get("computed_compass_angle", item.get("compass_angle"))
+    is_pano = bool(item.get("is_pano"))
+    distance = distance_m(lat, lon, photo_lat, photo_lon)
+    if is_pano or distance < 3:
+        faces_site = True
+    elif isinstance(heading, (int, float)):
+        faces_site = angle_between(heading, bearing_deg(photo_lat, photo_lon, lat, lon)) <= FACING_TOLERANCE_DEG
+    else:
+        faces_site = None  # unknown direction
     return {
         "id": str(item["id"]),
         "captured_at": captured_at,
         "lat": photo_lat,
         "lon": photo_lon,
-        "distance_m": round(distance_m(lat, lon, photo_lat, photo_lon)),
-        "compass_angle": item.get("compass_angle"),
+        "distance_m": round(distance),
+        "compass_angle": heading,
+        "is_pano": is_pano,
+        "faces_site": faces_site,
         "image_url": item.get("thumb_1024_url"),
         "page_url": f"https://www.mapillary.com/app/?pKey={item['id']}",
         "credit": f"Photo by {creator}, Mapillary, {LICENSE}",

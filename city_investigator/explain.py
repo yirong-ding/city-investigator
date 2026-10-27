@@ -55,6 +55,16 @@ MAX_REPAIRS = 1
 MAX_RECORDS = 80
 MAX_TOOL_ITEMS = 40
 MAX_TOOL_RADIUS_M = 400
+# Words for each SAM concept, to spot Muse Spark reporting something SAM 3.1 did not find.
+CONCEPT_WORDS = {
+    "water": ("water", "flooded"),
+    "puddle": ("puddle",),
+    "catch basin": ("catch basin", "drain", "sewer grate", "storm grate"),
+    "scaffolding": ("scaffold", "sidewalk shed"),
+    "construction fence": ("fence",),
+    "construction barrier": ("barrier", "barricade"),
+}
+NEGATION = r"\b(no|not|without|never|nor)\b[^.]{0,40}"
 
 SYSTEM = """You explain what a street photo and public records show about one place in Brooklyn, New York, \
 to a resident who asked a question. You get the photo (faces and license plates are blurred), an evidence \
@@ -268,7 +278,7 @@ def evidence_list(result: dict[str, Any]) -> dict[str, dict[str, Any]]:
     add({
         "id": "photo",
         "type": "photo",
-        "summary": f"The photo itself, taken {photo['taken_local']} New York time. Read signs and building numbers from it.",
+        "summary": f"The photo itself, taken {photo['taken_local']} New York time.",
         "url": photo.get("page_url") or "",
     })
     for observation in result["observations"]:
@@ -486,6 +496,27 @@ def check_claims(
     return kept, dropped, warnings
 
 
+def vision_disagreements(claims: list[dict[str, Any]], not_seen: list[str]) -> list[str]:
+    """Observations where Muse Spark reports something SAM 3.1 did not find. Either model can be wrong."""
+    notes = []
+    for claim in claims:
+        if claim["kind"] != "observation":
+            continue
+        text = claim["text"].lower()
+        for concept in not_seen:
+            if f"photo:not_seen:{slug(concept)}" in claim["evidence_ids"]:
+                continue  # the claim reports the absence
+            for word in CONCEPT_WORDS.get(concept, (concept,)):
+                pattern = rf"\b{re.escape(word)}"
+                if re.search(pattern, text) and not re.search(NEGATION + pattern, text):
+                    notes.append(
+                        f'Muse Spark reads "{claim["text"]}", but SAM 3.1 found no {concept}. '
+                        "One of the two models is wrong; check the photo."
+                    )
+                    break
+    return notes
+
+
 def repair_prompt(dropped: list[dict[str, Any]], warnings: list[str]) -> str:
     lines = ["The evidence checks found these problems:"]
     lines += [f"- Removed {json.dumps(item['claim'])}: {'; '.join(item['problems'])}" for item in dropped]
@@ -517,11 +548,15 @@ def explain(
     required = [eid for eid, item in known.items() if item["type"] == "flag" or item.get("state") == "no_coverage"]
     toolbox = Toolbox(result, known, store)
     started = time.monotonic()
+    cost = 0.0
 
     def call(messages: list[dict[str, Any]], **options: Any) -> Any:
+        nonlocal cost
         guard.check()
         response = client.chat.completions.create(model=model, messages=messages, **options)
-        guard.record(muse_cost(response.usage, price_prefix))
+        spent = muse_cost(response.usage, price_prefix)
+        cost += spent
+        guard.record(spent)
         return response.choices[0].message
 
     content: list[dict[str, Any]] = [{"type": "text", "text": question_text(result, known)}]
@@ -573,10 +608,13 @@ def explain(
         "warnings": warnings,
         "flags": result["flags"],
         "evidence": {eid: known[eid] for eid in cited},
+        "models_disagree": vision_disagreements(kept, result["not_seen"]),
         "tool_calls": toolbox.calls,
         "repairs": repairs,
         "photo_credit": result["photo"].get("credit"),
         "seconds": round(time.monotonic() - started, 1),
+        "model_calls": guard.calls,
+        "estimated_cost_usd": round(cost, 4),
         "estimated_spend_today_usd": round(guard.spent_today(), 4),
     }
 
@@ -602,16 +640,28 @@ def render(explanation: dict[str, Any]) -> str:
     if explanation["flags"]:
         lines += ["", "## Flags (from rules, not the model)", ""]
         lines += [f"- **{flag['severity'].upper()}** {flag['message']}" for flag in explanation["flags"]]
+    if explanation["models_disagree"]:
+        lines += ["", "## Muse Spark and SAM 3.1 disagree", ""]
+        lines += [f"- {note}" for note in explanation["models_disagree"]]
     if explanation["dropped"] or explanation["warnings"]:
         lines += ["", "## Removed or missing (evidence checks)", ""]
         lines += [f"- Removed: {claim_text(item['claim'])} ({'; '.join(item['problems'])})" for item in explanation["dropped"]]
         lines += [f"- {warning}" for warning in explanation["warnings"]]
     lines += ["", "## Sources", ""]
     for eid, item in explanation["evidence"].items():
+        if item["type"] == "flag":  # listed above
+            continue
         link = f" {item['url']}" if item.get("url") else ""
         lines.append(f"- `{eid}`: {item['summary']}{link}")
     if explanation["photo_credit"]:
         lines += ["", f"Photo: {explanation['photo_credit']}"]
+    kept, removed = len(explanation["claims"]), len(explanation["dropped"])
+    lines += [
+        "",
+        f"Checks: {kept} of {kept + removed} claims passed, {explanation['repairs']} repair round(s), "
+        f"{len(explanation['tool_calls'])} lookup(s), {explanation['model_calls']} model calls, "
+        f"about ${explanation['estimated_cost_usd']:.3f}.",
+    ]
     return "\n".join(lines) + "\n"
 
 
@@ -638,8 +688,8 @@ def explain_run(run_dir: Path, provider: str = "meta", store: Store | None = Non
     (run_dir / "explanation.md").write_text(report, encoding="utf-8")
     print("\n" + report)
     print(
-        f"Saved to {run_dir / 'explanation.md'} ({explanation['seconds']}s, "
-        f"estimated spend today ${explanation['estimated_spend_today_usd']})"
+        f"Saved to {run_dir / 'explanation.md'} ({explanation['seconds']}s; "
+        f"estimated spend today ${explanation['estimated_spend_today_usd']:.2f})"
     )
     return explanation
 

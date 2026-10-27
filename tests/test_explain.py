@@ -140,6 +140,9 @@ def test_explanation_uses_tools_drops_bad_claims_and_repairs(sidewalk_result, st
     report = ex.render(explanation)
     assert "**OBSERVED** Scaffolding covers the sidewalk." in report
     assert "Flags (from rules, not the model)" in report and "CC BY-SA 4.0" in report
+    assert "- `flag:" not in report  # flags are not repeated as sources
+    assert "Checks: 3 of 3 claims passed, 1 repair round(s), 1 lookup(s), 4 model calls" in report
+    assert explanation["estimated_cost_usd"] == pytest.approx(4 * (1000 * 1.25 + 100 * 4.25) / 1e6)
 
 
 def test_a_worse_repair_is_not_used(sidewalk_result, store):  # noqa: F811
@@ -165,3 +168,16 @@ def test_tools_look_up_buildings_and_records_without_owner_names(sidewalk_result
     assert "error" in tools.run("search_records", json.dumps({"topic": "noise"}))
     assert "error" in tools.run("no_such_tool", "{}")
     assert [call["tool"] for call in tools.calls][-1] == "no_such_tool"
+
+
+def test_muse_spark_and_sam_disagreements_are_reported():
+    def observation(text, ids=("photo",)):
+        return {"text": text, "kind": "observation", "evidence_ids": list(ids)}
+
+    not_seen = ["water", "catch basin"]
+    notes = ex.vision_disagreements([
+        observation("The corner has crosswalks and street drains."),  # SAM found no catch basin
+        observation("No water is visible.", ["photo:not_seen:water"]),  # reports the absence
+        observation("The street looks dry, with no standing water."),  # negated
+    ], not_seen)
+    assert len(notes) == 1 and "street drains" in notes[0] and "no catch basin" in notes[0]

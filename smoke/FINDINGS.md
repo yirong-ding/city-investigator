@@ -177,3 +177,14 @@ Lessons:
 Recurrence at Carroll St/4th Av within 150 m: FloodNet 17 events on 13 days since 2021-07-15 (deepest 35.94 in); 311 street flooding and catch basins 82 complaints on 65 days since 2010; 50 indoor sewer backups. Recurring by the 3-day definition for both sources.
 
 Fixes made after reading the real output: gaps over 180 days are separate earlier sheds, not paperwork gaps; permit status is labeled as today's status; the agreement flag says "consistent with"; lots come from the permit buildings; only permits within 20 m of the camera can contradict the photo; complaint timing separates street complaints from indoor backups.
+
+# Day 4 findings: Muse Spark writes the explanation (Oct 27, 2026)
+
+First real run, Carroll St/4th Av flooding (photo 1385498442151420, question about 2026-08-23), hosted Muse Spark 1.3, 24.4 s:
+
+- **The split pattern (tools, then the strict schema in a call without tools) works on hosted Muse Spark too**, not only on Muse Spark Open.
+- 10 claims, all passed the checks on the first try: 6 records, 2 observations, 2 inferences, 1 no coverage. Both flags were mentioned. It made no tool calls: the evidence list already answered the question.
+- It kept the caveats: "a complaint only means someone reported, not how bad it was", the Central Park gauge is 11.5 km away, and the 2024 photo "shows the place, not what it looked like on 2026-08-23".
+- **Muse Spark and SAM 3.1 disagreed:** Muse Spark said the photo shows "street drains"; SAM 3.1 found no catch basin. A rule now reports this kind of disagreement instead of letting either model win silently.
+
+Fixes made after reading the output: the FloodNet coverage note named every sensor in range as if both had recorded the events (both were at Carroll St/4th Av); the sources list repeated the flags; the report now gives this run's own cost and a one-line summary of the checks.

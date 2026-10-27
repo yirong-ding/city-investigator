@@ -134,6 +134,7 @@ def test_flood_lookup_finds_records_and_rain(store):
     coverage = by_source(result)
     assert coverage["311 flooding complaints"].state == FOUND
     assert coverage["FloodNet flood sensors"].state == FOUND
+    assert coverage["FloodNet flood sensors"].note.startswith("1 flood event at Test St/Example Av between")
     assert coverage["Rainfall"].state == FOUND
     rain = next(hit.evidence for hit in result.hits if hit.evidence.category == "rainfall")
     assert "0.79 in" in rain.summary

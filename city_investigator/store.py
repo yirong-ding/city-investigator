@@ -377,7 +377,11 @@ class Store:
         found = [hit for hit in hits if hit.evidence.category == "flood_event"]
         if found:
             state = FOUND
-            base = f"{plural(len(found), 'flood event')} at {names}{window_text(start, end)}."
+            at = sorted({hit.evidence.address or "a sensor" for hit in found})
+            base = f"{plural(len(found), 'flood event')} at {', '.join(at)}{window_text(start, end)}."
+            quiet = sorted({sensor.name for sensor in deployed} - set(at))
+            if quiet:
+                base += f" No events at {', '.join(quiet)}."
         else:
             state = PARTIAL if starts_late else NOTHING_FOUND
             base = (

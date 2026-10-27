@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from city_investigator import times
-from city_investigator.checks import Flag, flood_checks, sidewalk_checks
+from city_investigator.checks import Flag, flood_checks, sidewalk_checks, topic_checks
 from city_investigator.evidence import Evidence, day
 from city_investigator.geo import distance_m
 from city_investigator.meta import PROVIDERS, SpendGuard, data_url, env_float, meta_client
@@ -38,20 +38,17 @@ from city_investigator.settings import ROOT, load_env
 from city_investigator.sheds import ShedChain, build_chains
 from city_investigator.shortlist import street_view
 from city_investigator.store import Coverage, Hit, LookupResult, Store, overlaps
+from city_investigator.topics import TOPICS, detect_topic
 
 OUTPUT = ROOT / "data" / "private" / "investigations"
-CONCEPTS = {
-    "sidewalk": ["scaffolding", "construction fence", "construction barrier"],
-    # "storm drain" finds street drains that "catch basin" misses (SAM 3.1, Carroll St/4th Av photo).
-    "flooding": ["water", "puddle", "storm drain"],
-}
+# What SAM 3.1 looks for, per topic. For flooding, "storm drain" finds the street drains that
+# "catch basin" missed on the Carroll St/4th Av photo.
+CONCEPTS = {key: list(topic.concepts) for key, topic in TOPICS.items()}
 PRIVACY_CONCEPTS = ["face", "license plate"]
-RADIUS_M = {"sidewalk": 50, "flooding": 150}
+RADIUS_M = {key: topic.radius_m for key, topic in TOPICS.items()}
 MIN_CONFIDENCE = 0.4
 RECURRING_DAYS = 3
 USER_UNCERTAINTY_M = 10.0
-FLOOD_WORDS = ("flood", "water", "rain", "drain", "puddle", "sewer", "catch basin", "storm", "ponding")
-SIDEWALK_WORDS = ("sidewalk", "shed", "scaffold", "blocked", "construction", "obstruct", "wheelchair", "accessib", "walkway")
 STREET_FLOOD_COMPLAINTS = {"street_flooding", "catch_basin", "manhole_overflow"}
 
 # Reports each step as it starts; the terminal prints it, the web page streams it.
@@ -60,15 +57,6 @@ Progress = Callable[[str], None]
 
 def say(message: str) -> None:
     print(f"  {message}", flush=True)
-
-
-def detect_topic(question: str) -> str | None:
-    text = question.lower()
-    flood = any(word in text for word in FLOOD_WORDS)
-    sidewalk = any(word in text for word in SIDEWALK_WORDS)
-    if flood != sidewalk:
-        return "flooding" if flood else "sidewalk"
-    return None
 
 
 def parse_local(text: str) -> datetime:
@@ -229,6 +217,15 @@ def gather_sidewalk(
     return lots + permits + complaints, coverage, chains, valid
 
 
+def gather_topic(
+    store: Store, lat: float, lon: float, radius: float, when: datetime, topic: str
+) -> tuple[list[Hit], list[Coverage]]:
+    """For the newer topics: complaints and agency records from the topic's lookback until a month after."""
+    lookback = timedelta(days=TOPICS[topic].lookback_days or 365)
+    found = store.near(lat, lon, radius, when - lookback, when + timedelta(days=30), topic)
+    return found.hits, found.coverage
+
+
 def recurrence(store: Store, history: LookupResult, lat: float, lon: float, radius: float) -> dict[str, Any]:
     events = [hit.evidence for hit in history.hits if hit.evidence.category == "flood_event"]
     street = [hit.evidence for hit in history.hits if hit.evidence.category in STREET_FLOOD_COMPLAINTS]
@@ -354,7 +351,7 @@ async def investigate_photo(
     assert photo.lat is not None and photo.lon is not None and photo.taken_at is not None
     topic = topic or detect_topic(question)
     if topic is None:
-        raise ValueError("Could not tell whether the question is about flooding or a sidewalk; choose a topic.")
+        raise ValueError("Could not tell which kind of problem the question is about; choose a topic.")
     when = when or photo.taken_at
     radius = radius or RADIUS_M[topic]
 
@@ -371,6 +368,11 @@ async def investigate_photo(
         progress("Comparing the photo with the permits and complaints")
         flags: list[Flag] = sidewalk_checks(observations, permits_at_photo, chains, when, distances)
         extra["shed_chains"] = [chain.to_dict(times.now()) for chain in chains]
+    elif topic != "flooding":
+        hits, coverage = gather_topic(store, photo.lat, photo.lon, radius, when, topic)
+        distances = {hit.evidence.id: hit.distance_m for hit in hits if hit.distance_m is not None}
+        progress("Comparing the photo with the complaints and the agency's own records")
+        flags = topic_checks(topic, observations, [hit.evidence for hit in hits], when, distances)
     else:
         hits, coverage, rec, rain_before, sensor_state = gather_flooding(store, photo.lat, photo.lon, radius, when)
         model_state = next((c.state for c in coverage if c.source == "City stormwater flood maps"), None)
@@ -392,6 +394,7 @@ async def investigate_photo(
     result = {
         "question": question,
         "topic": topic,
+        "topic_label": TOPICS[topic].label,
         "question_moment": times.to_local(when).strftime("%Y-%m-%d %H:%M"),
         "radius_m": radius,
         "photo": photo.describe() | {"faces_and_plates_blurred_here": blurred},
@@ -431,12 +434,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("source", help="a Mapillary photo ID or a photo file")
     parser.add_argument("--question", required=True)
-    parser.add_argument("--topic", choices=sorted(CONCEPTS), help="flooding or sidewalk (guessed from the question)")
+    parser.add_argument("--topic", choices=sorted(TOPICS), help="the kind of problem (guessed from the question)")
     parser.add_argument("--lat", type=float, help="set the location instead of the photo's")
     parser.add_argument("--lon", type=float)
     parser.add_argument("--taken", help="when the photo was taken, if it has no date (YYYY-MM-DD [HH:MM])")
     parser.add_argument("--when", help="the moment the question is about, if not the photo's (YYYY-MM-DD [HH:MM])")
-    parser.add_argument("--radius", type=float, help="meters (default 50 for sidewalks, 150 for flooding)")
+    parser.add_argument("--radius", type=float, help="meters (each topic has its own default, from 25 to 150)")
     parser.add_argument("--yes", action="store_true", help="accept the photo's location without asking")
     parser.add_argument("--explain", action="store_true", help="have Muse Spark write the labeled explanation")
     parser.add_argument("--provider", choices=sorted(PROVIDERS), default="meta", help="for --explain: meta or open (Baseten)")

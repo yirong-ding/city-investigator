@@ -44,9 +44,11 @@ from city_investigator.config import (
     STORMWATER_PUBLISHER,
     STORMWATER_SCENARIOS,
 )
-from city_investigator.evidence import classify_complaint
+from city_investigator.evidence import classify_complaint, norm_bbl
+from city_investigator.geo import to_float
 from city_investigator.settings import SNAPSHOT_DIR, load_env
 from city_investigator.socrata import Socrata, SocrataError
+from city_investigator.sources import SOURCES, bbl_from_block_lot
 
 IEM_URL = "https://mesonet.agron.iastate.edu/cgi-bin/request/asos.py"
 ARCGIS_PAGE = 1000
@@ -67,12 +69,47 @@ class Step:
     dataset: str
     # SoQL where clauses to try in order; later ones are fallbacks for type differences.
     wheres: Callable[[dict[str, list[dict[str, Any]]]], list[str]]
-    keep: Callable[[dict[str, Any]], bool] = lambda row: True
+    keep: Callable[[dict[str, Any], dict[str, list[dict[str, Any]]]], bool] = lambda row, done: True
+
+
+def district_box(done: dict[str, list[dict[str, Any]]], margin_deg: float = 0.002) -> tuple[float, float, float, float]:
+    """(south, west, north, east) around the district's tax lots, about 200 m wider; the
+    neighborhood bounds when the lots are not downloaded yet."""
+    lats = [value for row in done.get("pluto", []) if (value := to_float(row.get("latitude"))) is not None]
+    lons = [value for row in done.get("pluto", []) if (value := to_float(row.get("longitude"))) is not None]
+    if not lats or not lons:
+        return NEIGHBORHOOD["bounds"]
+    return min(lats) - margin_deg, min(lons) - margin_deg, max(lats) + margin_deg, max(lons) + margin_deg
+
+
+def in_district_lots(row: dict[str, Any], done: dict[str, list[dict[str, Any]]]) -> bool:
+    """For borough-wide datasets: keep rows on one of the district's tax lots."""
+    lots = {norm_bbl(lot.get("bbl")) for lot in done.get("pluto", [])}
+    return not lots or bbl_from_block_lot(row) in lots
+
+
+def source_steps() -> list[Step]:
+    """The agency records of the newer topics (sources.py)."""
+    return [
+        Step(
+            source.name,
+            source.dataset,
+            lambda done, source=source: source.where(district_box(done)),
+            keep=in_district_lots if source.name == "facade_filings" else (lambda row, done: True),
+        )
+        for source in SOURCES.values()
+    ]
 
 
 def plan() -> list[Step]:
     board, dob_board = NEIGHBORHOOD["board_311"], NEIGHBORHOOD["board_dob"]
     return [
+        # First: the district's lots set the area the agency datasets are clipped to.
+        Step(
+            "pluto",
+            DATASETS["pluto"],
+            lambda _: [f"cd = '{NEIGHBORHOOD['pluto_cd']}'", f"cd = {NEIGHBORHOOD['pluto_cd']}"],
+        ),
         Step(
             "311_2020_on",
             DATASETS["311_2020_on"],
@@ -80,13 +117,13 @@ def plan() -> list[Step]:
                 f"community_board = '{board}' AND created_date >= '2020-01-01T00:00:00' "
                 f"AND complaint_type IN ({quoted(COMPLAINT_TYPES)})"
             ],
-            keep=lambda row: classify_complaint(row.get("complaint_type"), row.get("descriptor")) is not None,
+            keep=lambda row, done: classify_complaint(row.get("complaint_type"), row.get("descriptor")) is not None,
         ),
         Step(
             "311_2010s",
             DATASETS["311_2010s"],
             lambda _: [f"community_board = '{board}' AND complaint_type IN ({quoted(FLOOD_COMPLAINT_TYPES)})"],
-            keep=lambda row: classify_complaint(row.get("complaint_type"), row.get("descriptor")) is not None,
+            keep=lambda row, done: classify_complaint(row.get("complaint_type"), row.get("descriptor")) is not None,
         ),
         Step(
             "dob_now_permits",
@@ -115,11 +152,7 @@ def plan() -> list[Step]:
                 + ")"
             ],
         ),
-        Step(
-            "pluto",
-            DATASETS["pluto"],
-            lambda _: [f"cd = '{NEIGHBORHOOD['pluto_cd']}'", f"cd = {NEIGHBORHOOD['pluto_cd']}"],
-        ),
+        *source_steps(),
     ]
 
 
@@ -132,14 +165,22 @@ def fetch_step(client: Socrata, step: Step, done: dict[str, list[dict[str, Any]]
     if any("IN ()" in where for where in wheres):
         raise RuntimeError("nothing to query: an earlier step it depends on returned no rows")
     last_error: Exception | None = None
+    empty: tuple[str, list[dict[str, Any]]] | None = None
     for where in wheres:
         try:
             rows = client.rows(step.dataset, where)
-            return where, [scrub(row) for row in rows if step.keep(row)]
         except SocrataError as error:
             last_error = error
             if error.status != 400:  # only a malformed query is worth retrying with a fallback
                 raise
+            continue
+        kept = [scrub(row) for row in rows if step.keep(row, done)]
+        if kept:
+            return where, kept
+        # A valid clause can match nothing when the city writes the value another way: try the next.
+        empty = empty or (where, kept)
+    if empty:
+        return empty
     raise last_error or RuntimeError("no query to run")
 
 
@@ -308,7 +349,7 @@ def run(only: list[str] | None, folder: Path = SNAPSHOT_DIR, client: Socrata | N
     client = client or Socrata()
     done: dict[str, list[dict[str, Any]]] = {}
     # Dependent steps need their inputs even when only part of the plan is refreshed.
-    for name in ("floodnet_sensors",):
+    for name in ("floodnet_sensors", "pluto"):
         path = folder / f"{name}.json"
         if path.is_file():
             done[name] = json.loads(path.read_text())["rows"]

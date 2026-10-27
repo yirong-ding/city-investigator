@@ -4,7 +4,7 @@
 
 Built for the Meta Global AI Developer Hackathon (Oct 26 to Nov 4, 2026).
 
-> **Status:** Day 5. A web page runs the whole investigation and streams each step; every claim in the answer links to its evidence on a map and a timeline. Findings so far are in [`smoke/FINDINGS.md`](smoke/FINDINGS.md).
+> **Status:** Day 5. Nine kinds of street problems, a web page that runs the whole investigation and streams each step, and an answer whose every claim links to its evidence on a map and a timeline. Findings so far are in [`smoke/FINDINGS.md`](smoke/FINDINGS.md).
 
 ## What it does
 
@@ -47,6 +47,24 @@ python -m pytest tests # offline checks, no key needed
 ```
 
 Then run the [Day 1 smoke tests](smoke/README.md).
+
+## Topics
+
+Each topic says what SAM 3.1 looks for, which 311 complaints and agency records apply, and how far around the pin and how far back to search ([`topics.py`](city_investigator/topics.py), [`sources.py`](city_investigator/sources.py)). The 311 wording is the district's own, read from its complaints.
+
+| Topic | SAM 3.1 looks for | Agency records |
+|---|---|---|
+| Flooding | water, puddle, storm drain | FloodNet sensors, rainfall, the city's stormwater flood model |
+| Blocked sidewalk: sheds and scaffolding | scaffolding, construction fence, barrier | DOB shed, scaffold and fence permits, with how long each shed has stood |
+| Street trees | tree, dead tree, broken branch, fallen tree | Parks tree inventory, inspections, work orders |
+| Unsafe façades | scaffolding, safety netting | Façade inspection filings (Local Law 11), DOB shed permits |
+| Broken sidewalks | cracked sidewalk, raised slab, tree roots | DOT sidewalk violations, sidewalk damage from street trees |
+| Curb ramps and curbs | curb ramp, puddle, broken curb | DOT ramp survey (with ponding), ramp complaints |
+| Potholes and road damage | pothole, cracked asphalt, manhole cover | DOT pothole work orders (closed) |
+| Street construction | steel road plate, construction barrier, traffic cone | DOT street construction permits, street closures |
+| Outdoor dining structures | outdoor dining structure, restaurant table, planter | Dining Out NYC licenses, Open Restaurants inspections |
+
+Every topic gets the same checks: the problem seen and reported; seen but never reported; reported but not seen; an agency record that closed it out before the photo while the photo still shows it; and repeat reports. Topics add their own: a permit or license in force for the structure in the photo, an unsafe façade filing with or without a shed, the inventory tree nearest the camera, ponding recorded at a ramp. Each source carries a coverage note on what it cannot show (only buildings over six stories file façade inspections; only closed pothole work orders are published).
 
 ## Web page
 

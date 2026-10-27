@@ -6,12 +6,16 @@ const BASEMAP = 'https://tiles.openfreemap.org/styles/positron';
 const DISTRICT = [-73.995, 40.675];
 const KINDS = { observation: 'Observed', record: 'Record', model: 'Model', hypothesis: 'Inferred', no_coverage: 'No coverage' };
 const GROUPS = {
-  complaint: { name: '311 complaint', color: '#d9480f' },
-  permit: { name: 'DOB permit', color: '#5f3dc4' },
-  sensor: { name: 'FloodNet flood', color: '#0b7285' },
+  complaint: { name: '311 complaint', color: '#d9480f', row: 'Complaints' },
+  permit: { name: 'Permit or license', color: '#5f3dc4', row: 'Permits and licenses' },
+  agency: { name: 'Agency inspection, order or filing', color: '#1971c2', row: 'Agency actions' },
+  inventory: { name: 'City inventory (tree, ramp)', color: '#2b8a3e' },
+  sensor: { name: 'FloodNet flood', color: '#0b7285', row: 'Sensor floods' },
+  rain: { name: 'Rain', color: '#4a6fa5', row: 'Rain' },
   lot: { name: 'Property lot', color: '#868e96' },
   other: { name: 'Other record', color: '#495057' },
 };
+const ROWS = ['Complaints', 'Permits and licenses', 'Agency actions', 'Sensor floods', 'Rain'];
 const FLOOD = { 1: '#74a9e8', 2: '#1c4fb8', 3: '#0c8599' };
 const SCENARIOS = { moderate_current: "Today's sea levels", moderate_2050: '2050 sea levels' };
 
@@ -164,7 +168,8 @@ function renderLegend(data) {
   const counts = {};
   for (const feature of data.map.records.features) counts[feature.properties.group] = (counts[feature.properties.group] || 0) + 1;
   for (const [group, count] of Object.entries(counts)) {
-    legend.append(el('div', { class: 'item' }, el('span', { class: 'swatch', style: `background:${GROUPS[group].color}` }), `${GROUPS[group].name} (${count})`));
+    const spec = GROUPS[group] || GROUPS.other;
+    legend.append(el('div', { class: 'item' }, el('span', { class: 'swatch', style: `background:${spec.color}` }), `${spec.name} (${count})`));
   }
   const flood = data.map.flood.features;
   if (flood.length) {
@@ -252,7 +257,7 @@ function focusEvidence(id) {
 function allEvidence(data) {
   const items = new Map();
   for (const record of data.result.records) {
-    items.set(record.id, { id: record.id, summary: record.summary, address: record.address, distance_m: record.distance_m, url: record.url, date: record.start?.local, until: record.end?.local });
+    items.set(record.id, { id: record.id, group: record.group, summary: record.summary, address: record.address, distance_m: record.distance_m, url: record.url, date: record.start?.local, until: record.end?.local });
   }
   for (const [id, item] of Object.entries(data.explanation?.evidence || {})) {
     if (!items.has(id)) items.set(id, { ...item, id });
@@ -276,16 +281,25 @@ function shortName(id, item) {
     pluto: 'property lot',
     dobnow: 'DOB permit',
     doblegacy: 'DOB permit',
+    tree_points: 'tree (Parks inventory)',
+    tree_inspections: 'tree inspection',
+    tree_work_orders: 'tree work order',
+    facade_filings: 'façade filing',
+    sidewalk_violations: 'sidewalk violation',
+    tree_sidewalk_damage: 'tree damage record',
+    ramps: 'ramp survey',
+    ramp_complaints: 'ramp complaint',
+    pothole_orders: 'pothole work order',
+    street_permits: 'street permit',
+    street_closures: 'street closure',
+    dining_licenses: 'dining license',
+    dining_inspections: 'dining inspection',
   };
   return names[prefix] || id;
 }
 
-function rowOf(id, summary = '') {
-  if (id.startsWith('311:')) return 'Complaints';
-  if (id.startsWith('floodnet:')) return 'Sensor floods';
-  if (id.startsWith('rain:')) return 'Rain';
-  if (summary.startsWith('DOB permit')) return 'Permits';
-  return null;
+function rowOf(item) {
+  return GROUPS[item.group]?.row || null;
 }
 
 // Panels
@@ -300,7 +314,7 @@ function renderAnswer(data, waiting) {
   const { result, explanation } = data;
   tab.replaceChildren(
     el('h3', { class: 'question', text: result.question }),
-    el('p', { class: 'meta', text: `About ${result.question_moment} New York time · ${result.topic} · records within ${result.radius_m} m of the pin` }));
+    el('p', { class: 'meta', text: `About ${result.question_moment} New York time · ${result.topic_label || result.topic} · records within ${result.radius_m} m of the pin` }));
   if (!explanation) {
     tab.append(el('p', { class: 'waiting', text: waiting ? 'Muse Spark is reading the evidence and writing the answer…' : 'This run has no explanation yet.' }));
     return;
@@ -409,7 +423,7 @@ function parseLocal(text) {
 function timelineItems(data) {
   const items = [];
   for (const item of allEvidence(data).values()) {
-    const row = rowOf(item.id, item.summary);
+    const row = rowOf(item);
     const start = parseLocal(item.date);
     if (!row || !start) continue;
     items.push({ id: item.id, row, start, end: parseLocal(item.until), summary: item.summary });
@@ -448,7 +462,7 @@ function renderTimeline(data) {
   const photoTime = parseLocal(data.result.photo.taken_local);
   const asked = parseLocal(data.result.question_moment);
   if (!items.length) { host.append(el('p', { class: 'meta', text: 'No dated records near this pin.' })); return; }
-  const rows = ['Complaints', 'Permits', 'Sensor floods', 'Rain'].filter((row) => items.some((item) => item.row === row));
+  const rows = ROWS.filter((row) => items.some((item) => item.row === row));
   const recordTimes = items.flatMap((item) => [item.start, item.end || item.start]).map(Number);
   let t0 = Math.min(...recordTimes, asked ? Number(asked) : Infinity);
   let t1 = Math.max(...recordTimes, asked ? Number(asked) : -Infinity);
@@ -476,7 +490,7 @@ function renderTimeline(data) {
     text.textContent = row;
     chart.append(text);
   });
-  const colors = { Complaints: GROUPS.complaint.color, Permits: GROUPS.permit.color, 'Sensor floods': GROUPS.sensor.color, Rain: '#4a6fa5' };
+  const colors = Object.fromEntries(Object.values(GROUPS).filter((g) => g.row).map((g) => [g.row, g.color]));
   for (const item of items) {
     const y = top + rows.indexOf(item.row) * rowHeight + rowHeight / 2;
     const mark = item.end && item.end > item.start
@@ -658,6 +672,9 @@ async function init() {
   let resize;
   window.addEventListener('resize', () => { clearTimeout(resize); resize = setTimeout(() => state.run && renderTimeline(state.run), 150); });
 
+  const topics = await api('/api/topics').catch(() => []);
+  $('topic').replaceChildren(el('option', { value: '', text: 'From the question' }),
+    ...topics.map((topic) => el('option', { value: topic.key, text: topic.label })));
   const demos = await api('/api/demos').catch(() => []);
   for (const demo of demos) {
     $('demos').append(el('button', {

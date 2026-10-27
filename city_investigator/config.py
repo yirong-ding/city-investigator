@@ -31,8 +31,17 @@ DATASETS = {
 
 FLOODING = "flooding"
 SIDEWALK = "sidewalk"
+TREES = "trees"
+FACADES = "facades"
+SIDEWALK_DAMAGE = "sidewalk_damage"
+CURB_RAMPS = "curb_ramps"
+POTHOLES = "potholes"
+STREET_CONSTRUCTION = "street_construction"
+OUTDOOR_DINING = "outdoor_dining"
+GENERAL = "General Construction/Plumbing"
 
 # (complaint_type, descriptor) -> (topic, category). A descriptor of None matches any.
+# The wording was read from this district's own complaints (city_investigator.probe).
 COMPLAINTS: dict[tuple[str, str | None], tuple[str, str]] = {
     ("Sewer", "Street Flooding (SJ)"): (FLOODING, "street_flooding"),
     ("Sewer", "Highway Flooding (SH)"): (FLOODING, "street_flooding"),
@@ -42,20 +51,57 @@ COMPLAINTS: dict[tuple[str, str | None], tuple[str, str]] = {
     ("Sewer", "Manhole Overflow (Use Comments) (SA1)"): (FLOODING, "manhole_overflow"),
     ("Sewer Maintenance", "Catch Basin Clogged"): (FLOODING, "catch_basin"),
     ("Sewer Maintenance", "Backup"): (FLOODING, "sewer_backup"),
-    (
-        "General Construction/Plumbing",
-        "Sidewalk Shed/Pipe Scafford - Inadequate Defective/None",
-    ): (SIDEWALK, "shed_complaint"),
-    ("Sidewalk Condition", "Blocked - Construction"): (SIDEWALK, "construction_blocking"),
-    ("Street Condition", "Blocked - Construction"): (SIDEWALK, "construction_blocking"),
-    ("Sidewalk Condition", "Broken Sidewalk"): (SIDEWALK, "sidewalk_condition"),
-    ("Sidewalk Condition", "Sidewalk Violation"): (SIDEWALK, "sidewalk_condition"),
-    ("Sidewalk Condition", "Sidewalk Collapsed"): (SIDEWALK, "sidewalk_condition"),
+    ("Sewer Maintenance", "Flooding on Street"): (FLOODING, "street_flooding"),
+    # Sheds, scaffolds and other things standing on the sidewalk
+    (GENERAL, "Sidewalk Shed/Pipe Scafford - Inadequate Defective/None"): (SIDEWALK, "shed_complaint"),
+    ("Scaffold Safety", None): (SIDEWALK, "scaffold_safety"),
     ("Obstruction", None): (SIDEWALK, "obstruction"),
     ("Dumpster Complaint", "Blocking Sidewalk or Street"): (SIDEWALK, "obstruction"),
-    ("Outdoor Dining", "Sidewalk Zone Blocked"): (SIDEWALK, "obstruction"),
-    ("Curb Condition", None): (SIDEWALK, "curb_condition"),
-    ("Scaffold Safety", None): (SIDEWALK, "scaffold_safety"),
+    # Street trees
+    ("Damaged Tree", None): (TREES, "damaged_tree"),
+    ("Dead/Dying Tree", None): (TREES, "dead_tree"),
+    ("Overgrown Tree/Branches", None): (TREES, "overgrown_tree"),
+    ("Root/Sewer/Sidewalk Condition", None): (TREES, "tree_roots"),
+    ("Illegal Tree Damage", None): (TREES, "tree_harmed"),
+    ("Uprooted Stump", None): (TREES, "stump"),
+    ("Wood Pile Remaining", None): (TREES, "wood_pile"),
+    # Façades
+    (GENERAL, "Debris - Falling Or In Danger Of Falling"): (FACADES, "falling_debris"),
+    (GENERAL, "Wall/Retaining Wall - Bulging/Cracked"): (FACADES, "wall_cracked"),
+    (GENERAL, "Failure To Maintain"): (FACADES, "failure_to_maintain"),
+    (GENERAL, "Building Shaking/Vibrating/Structural Stability"): (FACADES, "structural_stability"),
+    (GENERAL, "Safety Netting/Guard Rails - Damaged/Inadequate/None (6 Stories/75 Feet Or Less)"): (FACADES, "netting"),
+    ("BEST/Site Safety", "Safety Netting/Guard Rails - Damaged/Inadequate/None (Over 6 Stories/75 Feet)"): (FACADES, "netting"),
+    # Broken sidewalks
+    ("Sidewalk Condition", "Broken Sidewalk"): (SIDEWALK_DAMAGE, "broken_sidewalk"),
+    ("Sidewalk Condition", "Sidewalk Collapsed"): (SIDEWALK_DAMAGE, "broken_sidewalk"),
+    ("Sidewalk Condition", "Sidewalk Violation"): (SIDEWALK_DAMAGE, "sidewalk_violation_question"),
+    ("Sidewalk Condition", "Defective Hardware"): (SIDEWALK_DAMAGE, "sidewalk_hazard"),
+    ("Sidewalk Condition", "Sidewalk Grating - Defective"): (SIDEWALK_DAMAGE, "sidewalk_hazard"),
+    ("Sidewalk Condition", "Cellar Door Open/Unprotected"): (SIDEWALK_DAMAGE, "sidewalk_hazard"),
+    ("Sidewalk Condition", "Cellar Door Defective"): (SIDEWALK_DAMAGE, "sidewalk_hazard"),
+    ("Sidewalk Condition", "Metal Protruding - Sign Stump"): (SIDEWALK_DAMAGE, "sidewalk_hazard"),
+    # Curb ramps and curbs
+    ("Sidewalk Condition", "Pedestrian Ramp Defective"): (CURB_RAMPS, "ramp_defective"),
+    ("Curb Condition", "Broken Curb"): (CURB_RAMPS, "broken_curb"),
+    ("Curb Condition", "Curb Defect-Metal Protruding"): (CURB_RAMPS, "broken_curb"),
+    # Potholes and road damage
+    ("Street Condition", "Pothole"): (POTHOLES, "pothole"),
+    ("Street Condition", "Cave-in"): (POTHOLES, "cave_in"),
+    ("Street Condition", "Failed Street Repair"): (POTHOLES, "failed_repair"),
+    ("Street Condition", "Rough, Pitted or Cracked Roads"): (POTHOLES, "rough_road"),
+    ("Street Condition", "Wear & Tear"): (POTHOLES, "rough_road"),
+    ("Street Condition", "Defective Hardware"): (POTHOLES, "road_hardware"),
+    # Street construction
+    ("Sidewalk Condition", "Blocked - Construction"): (STREET_CONSTRUCTION, "construction_blocking"),
+    ("Street Condition", "Blocked - Construction"): (STREET_CONSTRUCTION, "construction_blocking"),
+    ("Street Condition", "Plate Condition - Noisy"): (STREET_CONSTRUCTION, "road_plate"),
+    ("Street Condition", "Plate Condition - Shifted"): (STREET_CONSTRUCTION, "road_plate"),
+    ("Street Condition", "Dumpster - Construction Waste"): (STREET_CONSTRUCTION, "construction_dumpster"),
+    ("Sidewalk Condition", "Dumpster - Construction Waste"): (STREET_CONSTRUCTION, "construction_dumpster"),
+    # Outdoor dining
+    ("Outdoor Dining", "Sidewalk Zone Blocked"): (OUTDOOR_DINING, "dining_sidewalk_blocked"),
+    ("Outdoor Dining", None): (OUTDOOR_DINING, "dining_complaint"),
 }
 # Flooding history before 2020 lives in a separate dataset; only these types are kept there.
 FLOOD_COMPLAINT_TYPES = sorted({ctype for (ctype, _), (topic, _) in COMPLAINTS.items() if topic == FLOODING})
@@ -71,9 +117,13 @@ PERMIT_WORK_TYPES = {
 LEGACY_PERMIT_SUBTYPES = {"SH": "shed_permit", "SF": "scaffold_permit", "FN": "fence_permit"}
 
 # Fields never stored: names of property owners can single out private individuals.
+# The façade filings also name owners and the engineers who inspected.
 DROPPED_FIELDS = {"ownername", "owner_name", "owner_s_first_name", "owner_s_last_name",
                   "owner_s_business_name", "owner_s_house__", "owner_s_house_street_name",
-                  "owner_s_phone__", "owner_s_zip_code", "owner_business_name"}
+                  "owner_s_phone__", "owner_s_zip_code", "owner_business_name",
+                  "owner_bus_name", "owner_bus_street_name", "owner_city", "owner_state", "owner_zip",
+                  "qewi_name", "qewi_nys_lic_no", "qewi_bus_name", "qewi_bus_street_name", "qewi_city",
+                  "qewi_state", "qewi_zip", "callercity", "callerstate"}
 
 # Central Park weather station (Iowa Environmental Mesonet ID "NYC").
 RAIN_STATION = {"id": "NYC", "name": "Central Park weather station", "lat": 40.7790, "lon": -73.9692}

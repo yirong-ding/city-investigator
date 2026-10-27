@@ -9,10 +9,12 @@ contradiction.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from city_investigator.evidence import Evidence, day
 from city_investigator.sheds import ShedChain, days_between
+from city_investigator.sources import yes
+from city_investigator.topics import TOPICS, problem_categories
 
 AGREEMENT, CONFLICT, GAP = "agreement", "conflict", "gap"
 STRUCTURE_SEEN = {"seen_scaffolding", "seen_construction_fence", "seen_construction_barrier"}
@@ -196,3 +198,188 @@ def flood_checks(
             ids(recorded),
         ))
     return flags
+
+
+# The newer topics (topics.py): the same comparisons for every topic, plus a few of their own.
+
+REPORTED_BEFORE = timedelta(days=90)
+REPAIR_LOOKBACK = timedelta(days=365)
+# Agency records whose end date means the problem was closed out, with how to name them.
+CLOSURES = {
+    "pothole_repair": "a DOT pothole work order",
+    "sidewalk_violation": "a DOT sidewalk violation (dismissed: repaired or withdrawn)",
+    "tree_work_order": "a Parks tree work order",
+    "ramp_complaint_dot": "a DOT ramp complaint (temporary repair)",
+}
+# Permissions that should be in force when the structure in the photo stands.
+LICENSES = {
+    "street_construction": ({"street_permit", "street_closure"}, "a street construction permit or closure"),
+    "outdoor_dining": ({"dining_license"}, "a Dining Out NYC license"),
+}
+DINING_LICENSES_START = datetime(2024, 8, 1, tzinfo=timezone.utc)
+TREE_MATCH_M = 8
+RAMP_MATCH_M = 15
+
+
+def topic_checks(
+    topic: str,
+    observations: list[Evidence],
+    records: list[Evidence],
+    when: datetime,
+    distances: dict[str, float] | None = None,
+) -> list[Flag]:
+    """records are the topic's records around the pin; distances maps their IDs to meters from it."""
+    spec = TOPICS[topic]
+    distances = distances or {}
+    flags: list[Flag] = []
+    seen = [item for item in observations if item.category in problem_categories(topic)]
+    what = " and ".join(sorted({item.category.removeprefix("seen_").replace("_", " ") for item in seen}))
+    complaints = [item for item in records if item.id.startswith("311:") and item.topic == topic and item.start]
+    around = [item for item in complaints if when - timedelta(days=180) <= item.start <= when + timedelta(days=30)]
+    before = [item for item in complaints if when - REPORTED_BEFORE <= item.start <= when]
+    days = sorted({day(item.start) for item in complaints})
+    where = f"within {spec.radius_m:.0f} m"
+
+    if seen and around:
+        flags.append(Flag(
+            "reported_and_seen", AGREEMENT,
+            f"The photo shows {what}, and {len(around)} 311 complaint(s) {where} describe a {spec.noun} problem "
+            f"between {day(min(c.start for c in around))} and {day(max(c.start for c in around))}.",
+            ids(seen) + ids(around),
+        ))
+    elif seen and not complaints:
+        flags.append(Flag(
+            "seen_not_reported", GAP,
+            f"The photo shows {what}, but no 311 {spec.noun} complaint was filed {where} in the "
+            f"{spec.lookback_days // 365 or 1} year(s) before the photo. That is a gap in reporting, not proof it does not matter.",
+            ids(seen),
+        ))
+    if before and not seen:
+        flags.append(Flag(
+            "reported_not_seen", CONFLICT,
+            f"{len(before)} 311 complaint(s) in the 90 days before the photo describe a {spec.noun} problem {where}, "
+            "but SAM 3.1 found none in the photo. It may have been fixed, be out of frame, or be missed by the model.",
+            ids(before),
+        ))
+    closed = [
+        item for item in records
+        if item.category in CLOSURES and item.end and when - REPAIR_LOOKBACK <= item.end <= when
+        and distances.get(item.id, 0) <= IN_VIEW_M and not item.raw.get("canceldate")
+    ]
+    if seen and closed:
+        latest = max(closed, key=lambda item: item.end)
+        flags.append(Flag(
+            "closed_but_still_seen", CONFLICT,
+            f"{CLOSURES[latest.category].capitalize()} {distances.get(latest.id, 0):.0f} m away was closed on {day(latest.end)}, "
+            f"before the photo on {day(when)}, but the photo still shows {what}. The repair may not have held, "
+            "or the record may be about a different spot.",
+            ids(seen) + [latest.id],
+        ))
+    if len(days) >= 3:
+        flags.append(Flag(
+            "repeat_reports", GAP,
+            f"311 {spec.noun} complaints {where} were filed on {len(days)} separate days, {days[0]} to {days[-1]}.",
+            ids(complaints),
+        ))
+    if topic in LICENSES:
+        flags += license_checks(topic, seen, what, records, when, distances)
+    if topic == "facades":
+        flags += facade_checks(observations, records, when, distances)
+    if topic == "trees":
+        flags += tree_checks(observations, records, distances)
+    if topic == "curb_ramps":
+        flags += ramp_checks(seen, records, distances)
+    return flags
+
+
+def license_checks(
+    topic: str, seen: list[Evidence], what: str, records: list[Evidence], when: datetime, distances: dict[str, float]
+) -> list[Flag]:
+    categories, kind = LICENSES[topic]
+    if not seen or (topic == "outdoor_dining" and when < DINING_LICENSES_START):
+        return []  # nothing to explain, or the license records start after the photo
+    valid = [
+        item for item in records
+        if item.category in categories and item.start and item.start <= when <= (item.end or item.start)
+    ]
+    if valid:
+        return [Flag(
+            "licensed_and_seen", AGREEMENT,
+            f"The {what} in the photo is consistent with {kind} valid on {day(when)} "
+            f"({addresses(valid) if any(item.address for item in valid) else 'nearby'}).",
+            ids(seen) + ids(valid),
+        )]
+    return [Flag(
+        "seen_without_license", GAP,
+        f"The photo shows {what}, but no {kind.removeprefix('a ')} was valid on {day(when)} within "
+        f"{TOPICS[topic].radius_m:.0f} m. It may be filed under another address, unlicensed, or (for street work) emergency work.",
+        ids(seen),
+    )]
+
+
+def facade_checks(
+    observations: list[Evidence], records: list[Evidence], when: datetime, distances: dict[str, float]
+) -> list[Flag]:
+    protection = [item for item in observations if item.category in {"seen_scaffolding", "seen_safety_netting"}]
+    latest: dict[str, Evidence] = {}
+    for item in records:
+        if item.category == "facade_filing" and item.start and item.start <= when:
+            key = item.bbl or item.id
+            if key not in latest or item.start > latest[key].start:
+                latest[key] = item
+    flags = []
+    for filing in latest.values():
+        if str(filing.raw.get("filing_status") or "").strip().upper() != "UNSAFE":
+            continue
+        place = filing.address or "a building nearby"
+        rule = "An unsafe façade must have public protection, such as a sidewalk shed, until it is repaired"
+        if protection:
+            flags.append(Flag(
+                "facade_unsafe_protected", AGREEMENT,
+                f"The latest façade filing for {place} ({day(filing.start)}) is UNSAFE. {rule}, "
+                "consistent with what the photo shows.",
+                ids(protection) + [filing.id],
+            ))
+        else:
+            flags.append(Flag(
+                "facade_unsafe_unprotected", CONFLICT,
+                f"The latest façade filing for {place} ({day(filing.start)}) is UNSAFE. {rule}, but none is visible. "
+                "It may have been repaired since, or be out of frame.",
+                [filing.id],
+            ))
+    return flags
+
+
+def tree_checks(observations: list[Evidence], records: list[Evidence], distances: dict[str, float]) -> list[Flag]:
+    trees = [item for item in observations if item.category.startswith("seen_") and "tree" in item.category]
+    inventory = sorted(
+        (item for item in records if item.category == "tree_inventory" and item.id in distances),
+        key=lambda item: distances[item.id],
+    )
+    if not trees or not inventory or distances[inventory[0].id] > TREE_MATCH_M:
+        return []
+    nearest = inventory[0]
+    return [Flag(
+        "inventory_tree_nearby", AGREEMENT,
+        f"The Parks inventory lists a tree {distances[nearest.id]:.0f} m from the camera: "
+        f"{nearest.summary.removeprefix('Street tree in the Parks inventory: ')}. It is likely the tree in the photo; "
+        "the photo's direction was not checked.",
+        ids(trees) + [nearest.id],
+    )]
+
+
+def ramp_checks(seen: list[Evidence], records: list[Evidence], distances: dict[str, float]) -> list[Flag]:
+    puddles = [item for item in seen if item.category == "seen_puddle"]
+    surveyed = [
+        item for item in records
+        if item.category == "ramp_survey" and distances.get(item.id, RAMP_MATCH_M + 1) <= RAMP_MATCH_M
+        and yes(item.raw.get("ponding"))
+    ]
+    if not (puddles and surveyed):
+        return []
+    return [Flag(
+        "ramp_ponding_recorded", AGREEMENT,
+        "Water stands at the ramp in the photo, and DOT's ramp survey also recorded ponding at a ramp within "
+        f"{RAMP_MATCH_M} m.",
+        ids(puddles) + ids(surveyed),
+    )]

@@ -34,7 +34,9 @@ from city_investigator.investigate import OUTPUT, USER_UNCERTAINTY_M, investigat
 from city_investigator.photo_input import Photo, from_file, from_mapillary
 from city_investigator.settings import ROOT, load_env
 from city_investigator.shortlist import street_view
+from city_investigator.sources import SOURCES, STATE_CATEGORIES
 from city_investigator.store import Store
+from city_investigator.topics import TOPICS
 
 STATIC = Path(__file__).parent / "static"
 UPLOADS = ROOT / "data" / "private" / "uploads"
@@ -119,7 +121,7 @@ class InvestigationRequest(BaseModel):
     question: str
     taken: str | None = None  # New York time, YYYY-MM-DD [HH:MM]
     when: str | None = None
-    topic: Literal["flooding", "sidewalk"] | None = None
+    topic: str | None = None
     provider: Literal["meta", "open"] = "meta"
     explain: bool = True
 
@@ -154,15 +156,23 @@ def confirmed(photo: Photo, request: InvestigationRequest) -> Photo:
 
 
 def group(record: dict[str, Any]) -> str:
-    category = record.get("category") or ""
-    if record["id"].startswith("311:"):
+    """How the page draws a record: complaint, permit, agency action, inventory, sensor, lot or rain."""
+    rid, category = record["id"], record.get("category") or ""
+    prefix = rid.split(":", 1)[0]
+    if prefix == "311":
         return "complaint"
-    if category.endswith("_permit"):
+    if prefix == "rain":
+        return "rain"
+    if category.endswith(("_permit", "_license")) or category == "street_closure" or prefix in ("dobnow", "doblegacy"):
         return "permit"
-    if category == "flood_event":
+    if category in STATE_CATEGORIES or prefix in ("tree_points", "ramps"):
+        return "inventory"
+    if category == "flood_event" or prefix == "floodnet":
         return "sensor"
-    if category == "lot":
+    if category == "lot" or prefix == "pluto":
         return "lot"
+    if prefix in SOURCES:
+        return "agency"
     return "other"
 
 
@@ -225,6 +235,10 @@ def create_app(state: State | None = None) -> FastAPI:
     def demos() -> list[dict[str, Any]]:
         return DEMOS
 
+    @app.get("/api/topics")
+    def topics() -> list[dict[str, str]]:
+        return [{"key": topic.key, "label": topic.label, "example": topic.example} for topic in TOPICS.values()]
+
     @app.post("/api/photos")
     def add_photo(file: UploadFile | None = File(None), mapillary_id: str | None = Form(None)) -> dict[str, Any]:
         if file is not None and file.filename:
@@ -268,6 +282,8 @@ def create_app(state: State | None = None) -> FastAPI:
             raise HTTPException(400, str(error)) from error
         if photo.taken_at is None:
             raise HTTPException(400, "When was the photo taken?")
+        if request.topic and request.topic not in TOPICS:
+            raise HTTPException(400, f"Unknown topic {request.topic!r}.")
         job = Job(uuid.uuid4().hex[:12])
         state.jobs[job.id] = job
 
@@ -317,6 +333,9 @@ def create_app(state: State | None = None) -> FastAPI:
         result = json.loads((folder / "result.json").read_text())
         path = folder / "explanation.json"
         explanation = json.loads(path.read_text()) if path.is_file() else None
+        for record in [*result["records"], *((explanation or {}).get("evidence") or {}).values()]:
+            record["group"] = group(record)
+        result.setdefault("topic_label", TOPICS[result["topic"]].label if result["topic"] in TOPICS else result["topic"])
         return {"name": name, "result": result, "explanation": explanation, "map": map_layers(result, explanation, state.store)}
 
     @app.get("/api/runs/{name}/files/{file}")

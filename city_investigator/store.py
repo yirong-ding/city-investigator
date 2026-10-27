@@ -33,9 +33,15 @@ from city_investigator.evidence import (
 from city_investigator.floodmap import MODEL_NOTE, FloodMap
 from city_investigator.geo import distance_m
 from city_investigator.settings import SNAPSHOT_DIR
+from city_investigator.sources import STATE_CATEGORIES, Source, sources_for
+from city_investigator.sources import SOURCES as AGENCY_SOURCES
+from city_investigator.topics import TOPICS as TOPIC_SPECS
+from city_investigator.topics import in_topic
 
 FOUND, NOTHING_FOUND, NO_COVERAGE, PARTIAL = "found", "nothing_found", "no_coverage", "partial"
-TOPICS = ("flooding", "sidewalk")
+TOPICS = tuple(TOPIC_SPECS)
+# Topics whose coverage notes are written by hand below; the others get one note per source.
+OWN_COVERAGE = {"flooding", "sidewalk"}
 RAIN_WINDOW_LIMIT = timedelta(days=14)
 FLOODNET_REVIEW_LAG = timedelta(days=14)
 LOT_MATCH_M = 60
@@ -77,7 +83,8 @@ class LookupResult:
 
 def overlaps(evidence: Evidence, start: datetime | None, end: datetime | None) -> bool:
     if evidence.start is None:
-        return start is None and end is None
+        # An inventory describes how things stand, so it applies to any window.
+        return evidence.category in STATE_CATEGORIES or (start is None and end is None)
     finish = evidence.end or evidence.start
     if start and finish < start:
         return False
@@ -137,8 +144,8 @@ class Store:
             loaded.add("311_2020_on")
             evidence += [e for row in recent["rows"] if (e := from_311(row, recent["dataset"]))]
             span = (local_midnight(2020, 1, 1), times.parse(recent["retrieved_at"], "utc") or times.now())
-            periods["flooding"].append(span)
-            periods["sidewalk"].append(span)
+            for topic in TOPICS:
+                periods[topic].append(span)
         older = read("311_2010s")
         if older:
             loaded.add("311_2010s")
@@ -171,6 +178,19 @@ class Store:
             loaded.add("pluto")
             lots = [e for row in pluto["rows"] if (e := from_pluto(row, pluto["dataset"]))]
 
+        # Agency records of the newer topics; rows without coordinates are placed at their tax lot.
+        by_bbl = {lot.bbl: lot for lot in lots if lot.bbl}
+
+        def at_lot(bbl: str | None) -> tuple[float | None, float | None, str | None]:
+            lot = by_bbl.get(bbl) if bbl else None
+            return (lot.lat, lot.lon, lot.address) if lot else (None, None, None)
+
+        for source in AGENCY_SOURCES.values():
+            snapshot = read(source.name)
+            if snapshot:
+                loaded.add(source.name)
+                evidence += [e for row in snapshot["rows"] if (e := source.to_evidence(row, snapshot["dataset"], at_lot))]
+
         rain: list[tuple[datetime, float]] = []
         rainfall = read("rainfall")
         if rainfall:
@@ -201,8 +221,12 @@ class Store:
     ) -> LookupResult:
         topics = (topic,) if topic else TOPICS
         hits: list[Hit] = []
+        # A cheap box test first: the store holds tens of thousands of records.
+        dlat = radius_m / 110_000
         for item in self.evidence:
-            if item.topic not in topics or item.lat is None or item.lon is None:
+            if item.lat is None or item.lon is None or abs(item.lat - lat) > dlat or abs(item.lon - lon) > dlat * 1.4:
+                continue
+            if not any(in_topic(t, item.topic, item.category) for t in topics):
                 continue
             distance = distance_m(lat, lon, item.lat, item.lon)
             if distance <= radius_m and overlaps(item, start, end):
@@ -223,6 +247,11 @@ class Store:
         if "sidewalk" in topics:
             coverage.append(self._complaint_coverage("sidewalk", hits, radius_m, start, end))
             coverage.append(self._permit_coverage(hits, radius_m, start, end))
+        for other in (t for t in topics if t not in OWN_COVERAGE):
+            coverage.append(self._complaint_coverage(other, hits, radius_m, start, end))
+            coverage += [self._source_coverage(source, hits, radius_m, start, end) for source in sources_for(other)]
+            if other == "facades":
+                coverage.append(self._permit_coverage(hits, radius_m, start, end))
 
         lot = self.nearest_lot(lat, lon, min(radius_m, LOT_MATCH_M))
         if lot:
@@ -319,7 +348,7 @@ class Store:
     def _complaint_coverage(
         self, topic: str, hits: list[Hit], radius_m: float, start: datetime | None, end: datetime | None
     ) -> Coverage:
-        label = f"311 {topic} complaints"
+        label = f"311 {TOPIC_SPECS[topic].noun} complaints"
         periods = self.periods_311.get(topic, [])
         if not periods:
             return Coverage(label, NO_COVERAGE, "311 data is not loaded; run the snapshot.")
@@ -329,7 +358,10 @@ class Store:
         if not any(a <= window_end and b >= window_start for a, b in periods):
             return Coverage(label, NO_COVERAGE, f"311 data loaded covers {loaded_text}; the window falls outside it.")
         fully_covered = any(a <= window_start and b >= window_end for a, b in periods)
-        found = [hit for hit in hits if hit.evidence.topic == topic and hit.evidence.id.startswith("311:")]
+        found = [
+            hit for hit in hits
+            if hit.evidence.id.startswith("311:") and in_topic(topic, hit.evidence.topic, hit.evidence.category)
+        ]
         days = {day(hit.evidence.start) for hit in found}
         where = f"within {radius_m:.0f} m{window_text(start, end)}"
         if found:
@@ -341,7 +373,7 @@ class Store:
         else:
             state = NOTHING_FOUND if fully_covered else PARTIAL
             note = (
-                f"No {topic} complaints {where}. Complaints show who reports as well as what "
+                f"No {TOPIC_SPECS[topic].noun} complaints {where}. Complaints show who reports as well as what "
                 "happens: fewer complaints does not mean fewer problems."
             )
         if not fully_covered:
@@ -406,6 +438,19 @@ class Store:
                 "street water until it tops the curb (about 15 cm)."
             )
         return Coverage(label, state, " ".join([base, *notes]))
+
+    def _source_coverage(
+        self, source: Source, hits: list[Hit], radius_m: float, start: datetime | None, end: datetime | None
+    ) -> Coverage:
+        if source.name not in self.loaded:
+            return Coverage(source.label, NO_COVERAGE, f"Not loaded; run the snapshot with --only {source.name}.")
+        found = [hit for hit in hits if hit.evidence.id.startswith(f"{source.name}:")]
+        where = f"within {radius_m:.0f} m{window_text(start, end)}"
+        if found:
+            return Coverage(source.label, FOUND, f"{plural(len(found), 'record')} {where}. {source.caveat}")
+        # No façade filing is expected for most of the district's low buildings.
+        state = PARTIAL if source.name == "facade_filings" else NOTHING_FOUND
+        return Coverage(source.label, state, f"No records {where}. {source.caveat}")
 
     def _permit_coverage(self, hits: list[Hit], radius_m: float, start: datetime | None, end: datetime | None) -> Coverage:
         label = "DOB shed, scaffold and fence permits"

@@ -135,3 +135,19 @@ A lookup at 40.6787, -73.9830 (about 290 m from the real Carroll St/4th Av senso
 | 4th Av/Garfield Pl | 4 | 16.42 in | 53 | Next to Carroll St/4th Av |
 
 Hoyt St/5th St (29 sensor events, 6 complaints) against Carroll St/4th Av (13 events, 55 complaints) is a ready example of why complaint counts and sensor counts must be read separately.
+
+## Checking candidate photos (Oct 27, 2026)
+
+SAM 3.1 found no "scaffolding", "sidewalk shed" or "covered walkway" in four candidate photos, and looking at them confirmed it:
+
+| Photo | Site | Taken | What it shows |
+|---|---|---|---|
+| 1621408108523341 | 230 Court St | 2025-03-30, while shed permits were valid | The corner building next to No. 234, renovated with a new shopfront. No shed on the Court St front |
+| 955892331835596 | 230 Court St | 2020-05-13, before | The same corner with an empty, run-down shopfront. No shed |
+| 537647067273034 | 431 Hicks St | 2020-05-12, while shed permits were valid | A dashcam on the expressway below street level; it cannot see Hicks St |
+| 487700919150129 | 431 Hicks St | 2018-07-15, before | Blurry, rainy view along the expressway fence; no shed visible |
+
+Lessons:
+
+- **230 Court St is a real records-versus-photo conflict.** Shed permits have been valid continuously since July 2022, the building was clearly renovated between 2020 and 2025, yet the 2025 photo shows no shed on the Court St front. Either the shed is on another side, or it came down while the permit stayed open. Good material for "What has changed here?" and for showing that a permit is authorization, not presence.
+- **Distance and direction are not enough to pick photos.** Near 431 Hicks St, the closest photos come from the expressway below street level. Candidate photos need a visual check; `find_shed_photos` uses SAM 3.1 for that.

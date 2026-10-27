@@ -46,7 +46,8 @@ def fetch_image(photo_id: str, token: str, session: requests.Session | None = No
     return path, meta
 
 
-async def check(photo_ids: list[str], concepts: list[str]) -> None:
+async def check(photo_ids: list[str], concepts: list[str]) -> dict[str, dict[str, float | None]]:
+    """Segment each photo; return the best confidence per concept (None: nothing found)."""
     # The SAM client, parser and overlay drawing from the Day 1 smoke test.
     from smoke._common import SpendGuard, data_url, env_float, load_photo, meta_client
     from smoke.sam import draw_overlay, segment, summarize
@@ -55,6 +56,7 @@ async def check(photo_ids: list[str], concepts: list[str]) -> None:
     if not token:
         raise SystemExit("MAPILLARY_TOKEN is not set.")
     guard = SpendGuard(max_calls=len(photo_ids) * len(concepts))
+    found: dict[str, dict[str, float | None]] = {}
     async with meta_client(async_client=True) as api:
         for photo_id in photo_ids:
             try:
@@ -77,10 +79,12 @@ async def check(photo_ids: list[str], concepts: list[str]) -> None:
                 best = f", best confidence {scores[0]:.2f}" if scores else ""
                 print(f"  {concept!r}: {summary['objects']} found{best}")
                 results.append((concept, result))
+                found.setdefault(photo_id, {})[concept] = scores[0] if scores else None
             overlay = OUTPUT / f"{photo_id}_overlay.png"
             overlay.write_bytes(draw_overlay(jpeg, results))
             print(f"  Overlay: {overlay}")
     print(f"\nEstimated spend today: ${guard.spent_today():.4f}")
+    return found
 
 
 def main() -> None:

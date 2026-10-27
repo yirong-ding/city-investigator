@@ -368,3 +368,13 @@ def test_photo_check_reports_missing_image(tmp_path, monkeypatch):
 
     with pytest.raises(RuntimeError, match="no image for 7"):
         photo_check.fetch_image("7", "token", Session())
+
+
+def test_photo_counts_only_inside_a_permit_run(store):
+    from city_investigator.find_shed_photos import during_permits
+
+    chain = next(chain for chain in build_chains(store.evidence) if chain.bin == "3000001")
+    assert during_permits({"captured_at": "2025-02-01T12:00:00+00:00"}, chain)  # first run
+    assert not during_permits({"captured_at": "2025-08-01T12:00:00+00:00"}, chain)  # the 49-day gap
+    assert during_permits({"captured_at": "2026-05-01T12:00:00+00:00"}, chain)  # current run
+    assert not during_permits({"captured_at": None}, chain)

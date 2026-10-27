@@ -8,6 +8,8 @@ Requests that each add one feature, so a failure points at the feature that brok
   3. image + strict JSON schema
   4. image + tools + strict JSON schema (one tool loop, then a schema-valid answer)
   5. text + tools + strict JSON schema (the fallback if a model cannot take images)
+  6. image + tools, then the strict schema in a separate call without tools
+     (for providers that ignore the schema when tools are in the same request)
 
 Steps 4 and 5 feed back a fixed tool result that is labeled as a fixture, so they
 test the API mechanics, not real data. They also check that every cited evidence ID
@@ -117,6 +119,11 @@ QUESTION = (
     "This photo was taken near Carroll St and 4th Ave in Brooklyn (about 40.6787, -73.9830) "
     "on 2026-08-23. Is there flooding, and are there 311 complaints about it nearby?"
 )
+SYSTEM = (
+    "You investigate New York City streets. Label every claim: 'observation' for what "
+    "the photo shows (evidence_ids ['photo']), 'record' for what a tool result states "
+    "(cite its record id), 'hypothesis' for inferences. Cite only ids you were given."
+)
 TEXT_QUESTION = (
     "A resident reports street flooding near Carroll St and 4th Ave in Brooklyn "
     "(about 40.6787, -73.9830) on 2026-08-23. Are there 311 complaints about it nearby?"
@@ -128,7 +135,7 @@ def validate_claims(text: str, known_ids: set[str]) -> list[str]:
     try:
         data = json.loads(text)
     except (TypeError, json.JSONDecodeError) as error:
-        return [f"not JSON: {error}"]
+        return [f"not JSON: {error}; answer starts {str(text)[:80]!r}"]
     claims = data.get("claims") if isinstance(data, dict) else None
     if not isinstance(claims, list) or not claims:
         return ["missing or empty 'claims' list"]
@@ -149,7 +156,7 @@ class Runner:
         model_setting, default_model, self.price_prefix = PROVIDERS[provider]
         self.client = meta_client() if provider == "meta" else open_client()
         self.model = os.environ.get(model_setting) or default_model
-        self.guard = SpendGuard(max_calls=12)
+        self.guard = SpendGuard(max_calls=20)
         self.image_part = {"type": "image_url", "image_url": {"url": image_url}}
 
     def call(self, messages: list[dict[str, Any]], **options: Any) -> Any:
@@ -198,15 +205,10 @@ class Runner:
         return {"ok": not problems, "problems": problems, "answer": content}
 
     def step_all(self, with_image: bool = True, max_turns: int = 4) -> dict[str, Any]:
-        system = (
-            "You investigate New York City streets. Label every claim: 'observation' for what "
-            "the photo shows (evidence_ids ['photo']), 'record' for what a tool result states "
-            "(cite its record id), 'hypothesis' for inferences. Cite only ids you were given."
-        )
         question = QUESTION if with_image else TEXT_QUESTION
         known_ids = {"photo", FIXTURE_RECORD_ID} if with_image else {FIXTURE_RECORD_ID}
         messages: list[dict[str, Any]] = [
-            {"role": "system", "content": system},
+            {"role": "system", "content": SYSTEM},
             self.user_message(question, with_image),
         ]
         tool_calls_made = 0
@@ -235,6 +237,35 @@ class Runner:
                 )
         return {"ok": False, "problems": [f"no final answer after {max_turns} turns"]}
 
+    def step_split(self, max_turns: int = 4) -> dict[str, Any]:
+        """Tools first, then the strict schema in a separate call without tools.
+
+        For providers that ignore the schema when tools are in the same request.
+        """
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": SYSTEM},
+            self.user_message(QUESTION),
+        ]
+        tool_calls_made = 0
+        for _ in range(max_turns):
+            choice = self.call(messages, tools=TOOLS, tool_choice="auto").choices[0]
+            if choice.finish_reason != "tool_calls":
+                break
+            messages.append(choice.message.model_dump(exclude_none=True))
+            for call in choice.message.tool_calls:
+                tool_calls_made += 1
+                messages.append(
+                    {"role": "tool", "tool_call_id": call.id, "content": json.dumps(FIXTURE_RESULT)}
+                )
+        messages.append(
+            {"role": "user", "content": "Now give your answer as labeled claims in the required format."}
+        )
+        content = self.call(messages, response_format=CLAIMS_FORMAT).choices[0].message.content
+        problems = validate_claims(content, {"photo", FIXTURE_RECORD_ID})
+        if tool_calls_made == 0:
+            problems.append("model answered without calling the tool")
+        return {"ok": not problems, "tool_calls": tool_calls_made, "problems": problems, "answer": content}
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -257,6 +288,7 @@ def main() -> None:
         "3 image + strict schema": runner.step_schema,
         "4 image + tools + strict schema": runner.step_all,
         "5 text + tools + strict schema": lambda: runner.step_all(with_image=False),
+        "6 image + tools, then strict schema in a separate call": runner.step_split,
     }
     print(f"Provider: {args.provider}, model: {runner.model}\n")
     results: dict[str, Any] = {

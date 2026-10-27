@@ -2,6 +2,24 @@
 
 Results from running the smoke tests on Oct 27, 2026. Counts come straight from the script output.
 
+## Models
+
+| Test | Muse Spark 1.3 (Meta Model API) | Muse Spark Open (Baseten) |
+|---|---|---|
+| 0 text only | PASS, 1.2 s | PASS, 1.2 s |
+| 1 image | PASS, 3.5 s | PASS, 9.0 s |
+| 2 image + tools | PASS, 2.9 s | PASS, 9.0 s |
+| 3 image + strict schema | PASS, 4.1 s | PASS, 9.7 s |
+| 4 image + tools + strict schema | PASS, 8.1 s | **FAIL**: final answer was not JSON (22.9 s) |
+| 5 text + tools + strict schema | PASS, 6.9 s | **FAIL**: final answer was not JSON (6.6 s) |
+
+- **Muse Spark 1.3 does everything in one request.** It is the main path.
+- **Muse Spark Open takes images, tools and the schema, but ignores the schema when tools are in the same request.** Step 6 tests the workaround: run the tool loop first, then ask for the schema in a separate call without tools. It is also 2 to 3 times slower.
+
+**SAM 3.1 (hosted)** works with confidence scores: on the test photo it found 3 cars (0.84, 0.63, 0.56) and returned valid empty results for standing water, scaffolding and catch basin. No box fell outside the photo, so orientation handling is right.
+
+Estimated spend for all of Day 1: about $0.11.
+
 ## 311 problem types (Brooklyn Community Board 6, since Jan 1, 2024)
 
 Strings must match exactly, including the city's own typos.

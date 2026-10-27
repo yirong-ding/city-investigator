@@ -94,11 +94,11 @@ STORMWATER_PUBLISHER = {
     "account": "mocej.nyc.data",
     "services": "https://services6.arcgis.com/yG5s3afENB5iO9fj/arcgis/rest/services",
 }
+# Not used: the limited storm (1.77 in/hr) is only in the Open Data geodatabases, and the extreme
+# storm with 2080 sea levels times out on the ArcGIS server (504), even one shape at a time.
 STORMWATER_SCENARIOS = [
-    {"key": "limited_current", "match": ("limited", "current"), "title": "a limited storm (1.77 in/hr) with today's sea levels"},
     {"key": "moderate_current", "match": ("moderate", "current"), "title": "a moderate storm (2.13 in/hr) with today's sea levels"},
     {"key": "moderate_2050", "match": ("moderate", "2050"), "title": "a moderate storm (2.13 in/hr) with 2050 sea level rise"},
-    {"key": "extreme_2080", "match": ("extreme", "2080"), "title": "an extreme storm (3.66 in/hr) with 2080 sea level rise"},
 ]
 STORMWATER_CATEGORIES = {
     1: "nuisance flooding (4 in to 1 ft deep)",

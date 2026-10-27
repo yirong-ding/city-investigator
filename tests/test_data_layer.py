@@ -475,15 +475,15 @@ def test_flood_maps_come_from_the_climate_office_layers(tmp_path):
             feature(1, square(40.75, -73.85, 10)),  # Queens: outside the neighborhood
             feature(2, square(CORNER[0] + 15 / 110_574, CORNER[1], 10)),  # next page, overlaps the first
         ],
-        "NYC_Stormwater_Flood_Map___Extreme_Flood_with_2080_Sea_Level_Rise": [
-            feature("3 - Future High Tides 2080", square(*CORNER, 40)),
+        "NYC_Stormwater_Flood_Map___Moderate_Flood_with_2050_Sea_Level_Rise": [
+            feature("3 - Future High Tides 2050", square(*CORNER, 40)),
             feature(1, bowtie(*CORNER, 20)),  # crosses itself, like some city polygons
             feature(1, square(*CORNER, 5)),
         ],
     })
     payload = snapshot.fetch_stormwater(tmp_path, server)
     scenarios = {scenario["key"]: scenario for scenario in payload["scenarios"]}
-    assert set(scenarios) == {"moderate_current", "extreme_2080"}  # the others are not published here
+    assert set(scenarios) == {"moderate_current", "moderate_2050"}
     current = scenarios["moderate_current"]
     assert current["layer"].endswith("Moderate_Flood_with_Current_Sea_Levels/FeatureServer/3")  # not the _view copy
     [deep] = current["features"]
@@ -491,7 +491,7 @@ def test_flood_maps_come_from_the_climate_office_layers(tmp_path):
     merged = shapely.geometry.shape(deep["geometry"])
     assert merged.geom_type == "Polygon"  # the two overlapping squares became one
     assert merged.bounds[1] == pytest.approx(CORNER[0] - 10 / 110_574, abs=1e-6)
-    nuisance, tides = scenarios["extreme_2080"]["features"]
+    nuisance, tides = scenarios["moderate_2050"]["features"]
     assert (nuisance["category"], tides["category"]) == (1, 3)
     repaired = shapely.geometry.shape(nuisance["geometry"])
     assert repaired.is_valid and repaired.area > 0
@@ -509,21 +509,21 @@ def test_flood_map_without_a_category_field_is_reported():
 
 
 def test_one_failing_flood_layer_does_not_lose_the_others(tmp_path, capsys):
-    class BrokenExtreme(FloodMapServer):
+    class BrokenFuture(FloodMapServer):
         def get(self, url, params=None, timeout=None):
-            if "Extreme" in url and url.endswith("/query"):
+            if "2050" in url and url.endswith("/query"):
                 raise TimeoutError("read timed out")
             return super().get(url, params, timeout)
 
-    server = BrokenExtreme({
+    server = BrokenFuture({
         "Moderate_Flood_Map_Current_Sea_Levels": [feature(2, square(*CORNER, 10))],
-        "NYC_Stormwater_Flood_Map___Extreme_Flood_with_2080_Sea_Level_Rise": [feature(3, square(*CORNER, 40))],
+        "NYC_Stormwater_Flood_Map___Moderate_Flood_with_2050_Sea_Level_Rise": [feature(3, square(*CORNER, 40))],
     })
     payload = snapshot.fetch_stormwater(tmp_path, server)
     assert [scenario["key"] for scenario in payload["scenarios"]] == ["moderate_current"]
-    assert payload["failed"] == [{"key": "extreme_2080", "error": "TimeoutError: read timed out"}]
+    assert payload["failed"] == [{"key": "moderate_2050", "error": "TimeoutError: read timed out"}]
     out = capsys.readouterr().out
-    assert "stormwater moderate_current: 1 map features read" in out and "extreme_2080: FAILED" in out
+    assert "stormwater moderate_current: 1 map features read" in out and "moderate_2050: FAILED" in out
 
 
 def test_flood_layer_timeouts_are_retried_one_shape_at_a_time(tmp_path, monkeypatch, capsys):
@@ -538,7 +538,7 @@ def test_flood_layer_timeouts_are_retried_one_shape_at_a_time(tmp_path, monkeypa
                 raise requests.HTTPError("504 Gateway Timeout", response=SimpleNamespace(status_code=504))
             return super().get(url, params, timeout)
 
-    server = SlowServer({"Extreme_Flood_Map_2080_Sea_Level_Rise": [feature(1, square(*CORNER, 10)),
+    server = SlowServer({"Moderate_Flood_Map_Current_Sea_Levels": [feature(1, square(*CORNER, 10)),
                                                                    feature(2, square(*CORNER, 5))]})
     payload = snapshot.fetch_stormwater(tmp_path, server)
     assert [f["category"] for f in payload["scenarios"][0]["features"]] == [1, 2]

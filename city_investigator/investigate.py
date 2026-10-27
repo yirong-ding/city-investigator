@@ -8,9 +8,10 @@ Steps:
   4. Gather records and coverage notes for that place and time from the local snapshots.
   5. Run rule-based checks that compare the photo with the records.
   6. Save everything to data/private/investigations/<run>/ (never committed).
+  7. With --explain, Muse Spark writes the labeled, cited explanation (see explain.py).
 
 Usage:
-  python -m city_investigator.investigate 1306991370360816 --question "What records relate to this blocked sidewalk?"
+  python -m city_investigator.investigate 1306991370360816 --question "What records relate to this blocked sidewalk?" --explain
   python -m city_investigator.investigate 1385498442151420 --question "Is flooding a recurring problem here?" --when 2026-08-23
   python -m city_investigator.investigate my_photo.jpg --question "Is this flooding recurring?" --lat 40.6763 --lon -73.9841
 """
@@ -29,7 +30,7 @@ from city_investigator import times
 from city_investigator.checks import Flag, flood_checks, sidewalk_checks
 from city_investigator.evidence import Evidence, day
 from city_investigator.geo import distance_m
-from city_investigator.meta import SpendGuard, data_url, env_float, meta_client
+from city_investigator.meta import PROVIDERS, SpendGuard, data_url, env_float, meta_client
 from city_investigator.photo_input import Photo, from_file, from_mapillary
 from city_investigator.segment import blur_regions, draw_overlay, segment, summarize
 from city_investigator.settings import ROOT, load_env
@@ -367,6 +368,10 @@ async def investigate(args: argparse.Namespace) -> dict[str, Any]:
     (run_dir / "result.json").write_text(json.dumps(result, indent=2))
     print_report(result)
     print(f"\nSaved to {run_dir}")
+    if args.explain:
+        from city_investigator.explain import explain_run  # explain imports this module
+
+        explain_run(run_dir, args.provider, store)
     return result
 
 
@@ -381,6 +386,8 @@ def main() -> None:
     parser.add_argument("--when", help="the moment the question is about, if not the photo's (YYYY-MM-DD [HH:MM])")
     parser.add_argument("--radius", type=float, help="meters (default 50 for sidewalks, 150 for flooding)")
     parser.add_argument("--yes", action="store_true", help="accept the photo's location without asking")
+    parser.add_argument("--explain", action="store_true", help="have Muse Spark write the labeled explanation")
+    parser.add_argument("--provider", choices=sorted(PROVIDERS), default="meta", help="for --explain: meta or open (Baseten)")
     args = parser.parse_args()
     load_env()
     asyncio.run(investigate(args))

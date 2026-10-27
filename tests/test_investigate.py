@@ -155,7 +155,7 @@ def test_whole_investigation_runs_offline(store, tmp_path, monkeypatch):  # noqa
     monkeypatch.setattr(inv, "OUTPUT", tmp_path / "out")
     args = inv.argparse.Namespace(
         source="123", question="What records relate to this blocked sidewalk?", topic=None, lat=None, lon=None,
-        taken=None, when=None, radius=None, yes=True,
+        taken=None, when=None, radius=None, yes=True, explain=False, provider="meta",
     )
     result = inv.asyncio.run(inv.investigate(args))
     assert result["topic"] == "sidewalk"

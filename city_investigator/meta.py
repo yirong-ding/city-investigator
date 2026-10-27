@@ -13,6 +13,11 @@ from typing import Any
 from city_investigator.settings import ROOT
 
 LEDGER = ROOT / ".cache" / "spend.json"
+# Provider: (model setting, default model, price setting prefix)
+PROVIDERS = {
+    "meta": ("MUSE_MODEL", "muse-spark-1.3", "MUSE"),
+    "open": ("OPEN_MODEL_ID", "meta-models/muse-spark-open-1026", "OPEN_MODEL"),
+}
 
 
 def env_float(name: str, default: float) -> float:
@@ -94,6 +99,13 @@ def open_client() -> Any:
         raise SystemExit("OPEN_MODEL_API_KEY is not set. Add your Baseten key to .env.")
     base_url = os.environ.get("OPEN_MODEL_BASE_URL") or "https://inference.baseten.co/v1"
     return OpenAI(base_url=base_url, api_key=key)
+
+
+def chat_client(provider: str) -> tuple[Any, str, str]:
+    """(client, model, price setting prefix) for Muse Spark on Meta ("meta") or Baseten ("open")."""
+    model_setting, default_model, price_prefix = PROVIDERS[provider]
+    client = meta_client() if provider == "meta" else open_client()
+    return client, os.environ.get(model_setting) or default_model, price_prefix
 
 
 def load_photo(path: Path, max_side: int = 1600) -> tuple[bytes, tuple[int, int]]:

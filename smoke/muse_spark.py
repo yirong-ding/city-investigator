@@ -24,28 +24,20 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import time
 from pathlib import Path
 from typing import Any
 
+from city_investigator.meta import PROVIDERS, chat_client
 from smoke._common import (
     SpendCapError,
     SpendGuard,
     data_url,
     load_env,
     load_photo,
-    meta_client,
     muse_cost,
-    open_client,
     write_result,
 )
-
-# Provider: (model setting, default model, price setting prefix)
-PROVIDERS = {
-    "meta": ("MUSE_MODEL", "muse-spark-1.3", "MUSE"),
-    "open": ("OPEN_MODEL_ID", "meta-models/muse-spark-open-1026", "OPEN_MODEL"),
-}
 
 KINDS = ["observation", "record", "model", "hypothesis", "no_coverage"]
 
@@ -153,9 +145,7 @@ def validate_claims(text: str, known_ids: set[str]) -> list[str]:
 
 class Runner:
     def __init__(self, image_url: str, provider: str = "meta") -> None:
-        model_setting, default_model, self.price_prefix = PROVIDERS[provider]
-        self.client = meta_client() if provider == "meta" else open_client()
-        self.model = os.environ.get(model_setting) or default_model
+        self.client, self.model, self.price_prefix = chat_client(provider)
         self.guard = SpendGuard(max_calls=20)
         self.image_part = {"type": "image_url", "image_url": {"url": image_url}}
 

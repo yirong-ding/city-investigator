@@ -4,7 +4,7 @@
 
 Built for the Meta Global AI Developer Hackathon (Oct 26 to Nov 4, 2026).
 
-> **Status:** Day 3. One command runs a whole investigation in the terminal. The Day 1 and 2 findings, including the chosen demo sites, are in [`smoke/FINDINGS.md`](smoke/FINDINGS.md).
+> **Status:** Day 4. One command runs a whole investigation in the terminal, and Muse Spark writes the labeled, cited explanation. The Day 1 and 2 findings, including the chosen demo sites, are in [`smoke/FINDINGS.md`](smoke/FINDINGS.md).
 
 ## What it does
 
@@ -27,7 +27,7 @@ Conflicts between sources and gaps in the records are flagged, not smoothed over
 | Muse Spark | Plans the investigation and writes the explanation |
 | SAM 3.1 | Segments the photo (water, scaffolding, curbs, catch basins) |
 | Muse Voice Transcribe | Spoken questions (planned) |
-| Muse Spark Open | Open-weight option for the agent (planned) |
+| Muse Spark Open | Open-weight option for the explanation (`--provider open`, on Baseten) |
 
 ## Data
 
@@ -57,6 +57,25 @@ python -m city_investigator.investigate my_photo.jpg --question "Is this floodin
 The source is a Mapillary photo ID or your own photo. The command confirms where and when the photo was taken, blurs faces and license plates (Mapillary photos arrive already blurred), finds what the question is about with SAM 3.1, gathers records and coverage notes for that place and time, and runs rule-based checks. Results go to `data/private/investigations/` (never committed): the blurred photo, an overlay, and `result.json`.
 
 Checks raise typed flags: a permit that matches the structure in the photo, a structure with no permit, a permit with no visible structure, permit chain gaps, a sensor flood nobody reported, complaints the sensor did not see, water with no rain, complaints arriving hours after the sensor, and a photo taken at a different moment from the one asked about. Flooding questions also get a recurrence summary per source, with its definition.
+
+## Explain
+
+Add `--explain` to the investigate command, or explain a saved run:
+
+```bash
+python -m city_investigator.explain latest
+python -m city_investigator.explain latest --provider open   # Muse Spark Open on Baseten
+```
+
+Muse Spark gets the question, the blurred photo and every piece of evidence with an ID. It can call three tools that look further in the local snapshots: `search_records` (any period around the confirmed pin), `building_records` (everything filed under one building) and `get_record` (every field of one record). It answers in short claims, each labeled observation, record, model, hypothesis or no_coverage and citing evidence IDs. It also reads signs and building numbers in the photo.
+
+Code checks every claim before it is shown:
+
+- A claim that cites an ID that does not exist is dropped.
+- A label must fit what it cites: observations cite only the photo, records cite records or coverage notes and never the photo, no_coverage claims cite a coverage note. A claim that combines the photo and records must be labeled a hypothesis.
+- Every flag, and every source with no coverage, must be mentioned.
+
+When a check fails, Muse Spark gets one chance to fix its answer, and the better of the two answers is kept. Flags always come from the rules, never from the model. The run folder gets `explanation.md` and `explanation.json`, including the dropped claims and the tool calls.
 
 ## Data layer
 

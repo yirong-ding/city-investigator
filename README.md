@@ -31,7 +31,7 @@ Conflicts between sources and gaps in the records are flagged, not smoothed over
 
 ## Data
 
-NYC Open Data (311 service requests, PLUTO property data, Department of Buildings permits), FloodNet street flooding sensors (New York University and The City University of New York), hourly rain at the Central Park weather station, and the [NYC Stormwater Flood Maps](https://data.cityofnewyork.us/d/9i7c-xyvv). Sources are credited in the app.
+NYC Open Data (311 service requests, PLUTO property data, Department of Buildings permits), FloodNet street flooding sensors (New York University and The City University of New York), hourly rain at the Central Park weather station, and the [NYC Stormwater Flood Maps](https://data.cityofnewyork.us/d/9i7c-xyvv) from the Mayor's Office of Climate and Environmental Justice. Sources are credited in the app.
 
 The flood maps are the **model** evidence: where the city's models expect rain to pond (4 in or deeper, over at least a quarter acre) in a limited and a moderate storm today, a moderate storm with 2050 sea levels, and an extreme storm with 2080 sea levels. Checks compare them with what was recorded: flooding the model also expects, or flooding the model does not map.
 

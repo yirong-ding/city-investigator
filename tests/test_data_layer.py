@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import math
-import zipfile
 from datetime import date, datetime, timezone
 
 import pytest
@@ -424,128 +423,65 @@ def test_flood_model_reports_each_category_by_distance(store):
     assert by_source(far)["City stormwater flood maps"].state == NOTHING_FOUND
 
 
-class FakeDownload:
-    def __init__(self, status, content=b"", body=None, content_type="application/zip"):
-        self.ok, self.status_code, self.content, self.body = status == 200, status, content, body
-        self.headers = {"content-type": content_type}
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
-    def iter_content(self, size):
-        yield self.content
-
-    def json(self):
-        return self.body
+MOCEJ = "https://services6.arcgis.com/yG5s3afENB5iO9fj/arcgis/rest/services"
 
 
-def write_flood_layer(folder, name, polygons):
-    """A file geodatabase in State Plane feet, like the city's, with (category, GeoJSON polygon) pairs."""
-    import numpy as np
-    import pyogrio
-    import shapely
-    from pyproj import Transformer
-
-    to_feet = Transformer.from_crs("EPSG:4326", "EPSG:2263", always_xy=True)
-
-    def feet(geojson):
-        xs, ys = to_feet.transform(*zip(*geojson["coordinates"][0]))
-        return shapely.to_wkb(shapely.MultiPolygon([shapely.Polygon(zip(xs, ys))]))
-
-    gdb = folder / f"{name}.gdb"
-    pyogrio.raw.write(
-        gdb, geometry=np.array([feet(polygon) for _, polygon in polygons], dtype=object),
-        field_data=[np.array([category for category, _ in polygons], dtype="int32")], fields=["Flooding_Category"],
-        geometry_type="MultiPolygon", crs="EPSG:2263", driver="OpenFileGDB", layer="flooding",
-    )
-    return gdb
+def feature(category, polygon):
+    return {"type": "Feature", "properties": {"OBJECTID": 1, "Flooding_Category": category}, "geometry": polygon}
 
 
-def zip_folder(source, archive, prefix=""):
-    with zipfile.ZipFile(archive, "w") as out:
-        for path in source.rglob("*"):
-            if path.is_file():
-                out.write(path, prefix + path.relative_to(source).as_posix())
+class FloodMapServer:
+    """Answers like the climate office's ArcGIS services, two features per page."""
+
+    def __init__(self, layers):
+        self.layers, self.queries = layers, []
+
+    def get(self, url, params=None, timeout=None):
+        if url == MOCEJ:
+            names = list(self.layers) + ["NYC_Stormwater_Flood_Map___Moderate_Flood_with_Current_Sea_Levels_view"]
+            return FakeResponse({"services": [{"name": name, "type": "FeatureServer"} for name in names]
+                                           + [{"name": "Basemap", "type": "MapServer"}]})
+        if url.endswith("/FeatureServer"):
+            return FakeResponse({"layers": [{"id": 3, "name": "flooding"}]})
+        assert url.endswith("/FeatureServer/3/query") and params["inSR"] == 4326 and params["outSR"] == 4326
+        self.queries.append(url)
+        name = url.split("/")[-4]
+        offset = params["resultOffset"]
+        page = self.layers[name][offset:offset + 2]
+        return FakeResponse({"type": "FeatureCollection", "features": page,
+                                       "properties": {"exceededTransferLimit": offset + 2 < len(self.layers[name])}})
 
 
-def test_flood_map_download_finds_each_scenario(tmp_path, monkeypatch):
+def test_flood_maps_come_from_the_climate_office_layers(tmp_path):
     import shapely.geometry
 
-    # The collection: one scenario directly in the zip, another inside a nested zip, one here and one in Queens.
-    content = tmp_path / "content"
-    content.mkdir()
-    write_flood_layer(content, "NYC Stormwater Flood Map - Moderate Flood with Current Sea Levels",
-                      [(2, square(*CORNER, 10)), (1, square(40.75, -73.85, 10))])
-    nested = tmp_path / "nested"
-    nested.mkdir()
-    write_flood_layer(nested, "NYC Stormwater Flood Map - Extreme Flood with 2080 Sea Level Rise", [(3, square(*CORNER, 30))])
-    zip_folder(nested, content / "extreme.zip")
-    archive = tmp_path / "collection.zip"
-    zip_folder(content, archive)
-
-    class Session:
-        urls = []
-
-        def get(self, url, timeout=None, stream=False):
-            self.urls.append(url)
-            if url.endswith("/api/views/9i7c-xyvv.json"):
-                return FakeDownload(200, body={"blobId": "blob-1", "blobFilename": "flood maps.zip"})
-            if "/files/blob-1?download=true&filename=flood%20maps.zip" in url:
-                return FakeDownload(200, archive.read_bytes())
-            return FakeDownload(404)
-
-    folder = tmp_path / "snapshots"
-    payload = snapshot.fetch_stormwater(folder, Session())
+    server = FloodMapServer({
+        "NYC_Stormwater_Flood_Map___Moderate_Flood_with_Current_Sea_Levels": [
+            feature(2, square(*CORNER, 10)),
+            feature(1, square(40.75, -73.85, 10)),  # Queens: outside the neighborhood
+            feature(2, square(CORNER[0] + 15 / 110_574, CORNER[1], 10)),  # next page, overlaps the first
+        ],
+        "NYC_Stormwater_Flood_Map___Extreme_Flood_with_2080_Sea_Level_Rise": [
+            feature("3 - Future High Tides 2080", square(*CORNER, 40)),
+        ],
+    })
+    payload = snapshot.fetch_stormwater(tmp_path, server)
     scenarios = {scenario["key"]: scenario for scenario in payload["scenarios"]}
-    assert set(scenarios) == {"moderate_current", "extreme_2080"}  # the others are not in this download
-    [feature] = scenarios["moderate_current"]["features"]  # Queens was clipped away
-    assert feature["category"] == 2 and scenarios["moderate_current"]["dataset"] == "9i7c-xyvv"
-    center = shapely.geometry.shape(feature["geometry"]).centroid
-    assert center.y == pytest.approx(CORNER[0], abs=1e-5) and center.x == pytest.approx(CORNER[1], abs=1e-5)
+    assert set(scenarios) == {"moderate_current", "extreme_2080"}  # the others are not published here
+    current = scenarios["moderate_current"]
+    assert current["layer"].endswith("Moderate_Flood_with_Current_Sea_Levels/FeatureServer/3")  # not the _view copy
+    [deep] = current["features"]
+    assert deep["category"] == 2 and current["dataset"] == "9i7c-xyvv"
+    merged = shapely.geometry.shape(deep["geometry"])
+    assert merged.geom_type == "Polygon"  # the two overlapping squares became one
+    assert merged.bounds[1] == pytest.approx(CORNER[0] - 10 / 110_574, abs=1e-6)
     assert scenarios["extreme_2080"]["features"][0]["category"] == 3
-    assert (folder / "raw" / "stormwater_9i7c-xyvv.zip").is_file()
-    assert [path.name for path in (folder / "raw").iterdir()] == ["stormwater_9i7c-xyvv.zip"]  # unpacked files removed
-    calls = len(Session.urls)
-    snapshot.fetch_stormwater(folder, Session())
-    assert len(Session.urls) == calls  # the zip is reused
+    assert len(server.queries) == 3  # two pages, then one
+    assert payload["publisher"]["account"] == "mocej.nyc.data"
 
 
-def test_flood_map_download_reports_what_came_back(tmp_path, capsys):
-    class Session:
-        def get(self, url, timeout=None, stream=False):
-            if url.endswith(".json"):
-                return FakeDownload(200, body={"name": "NYC Stormwater Flood Maps", "viewType": "href"})
-            return FakeDownload(200, b"<!DOCTYPE html><html>", content_type="text/html")
-
-    with pytest.raises(RuntimeError, match='"viewType": "href"'):
-        snapshot.download_zip("9i7c-xyvv", tmp_path / "maps.zip", Session())
-    assert "text/html, starts b'<!DOCTYPE html>" in capsys.readouterr().out
-    assert not list(tmp_path.iterdir())  # no partial file left behind
-
-
-def test_flood_map_finder_lists_sources_and_publishers(capsys):
-    from city_investigator import find_flood_maps
-
-    class Session:
-        def get(self, url, params=None, timeout=None):
-            if "/api/views/" in url:
-                return FakeDownload(200, body={"name": "NYC Stormwater Flood Map", "viewType": "blobby", "blobFilename": "map.zip"})
-            if url.endswith("/search"):
-                return FakeDownload(200, body={"results": [
-                    {"title": "Moderate Stormwater Flooding", "orgId": "org1", "owner": "nyc_gis", "numViews": 9, "url": "https://x/FeatureServer"},
-                    {"title": "Bike lanes", "orgId": "org2"},
-                ]})
-            if "/portals/" in url:
-                return FakeDownload(200, body={"name": "City Agency" if url.endswith("org1") else "Someone"})
-            return FakeDownload(200, body={"services": [{"name": "Moderate_Current_Sea_Levels", "type": "FeatureServer"}]})
-
-    find_flood_maps.open_data(Session())
-    find_flood_maps.arcgis(Session())
-    out = capsys.readouterr().out
-    assert "7r5q-vr7p (moderate storm, current sea levels): 'NYC Stormwater Flood Map'; type blobby" in out
-    assert "Moderate Stormwater Flooding | City Agency (nyc_gis) | views 9 | https://x/FeatureServer" in out
-    assert "Bike lanes" not in out
-    assert "Layers hosted by Someone" in out and "Moderate_Current_Sea_Levels (FeatureServer)" in out
+def test_flood_map_without_a_category_field_is_reported():
+    with pytest.raises(RuntimeError, match="no flooding category field; fields: \\['DEPTH', 'OBJECTID'\\]"):
+        snapshot.flood_category({"OBJECTID": 1, "DEPTH": 2})
+    assert snapshot.flood_category({"flooding_category": "1-Nuisance Flooding"}) == 1
+    assert snapshot.flood_category({"Flooding_Category": None}) is None

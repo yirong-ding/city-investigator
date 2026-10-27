@@ -84,7 +84,7 @@ class FloodMap:
             kind="model",
             topic="flooding",
             category="modeled_flooding",
-            source="NYC Stormwater Flood Maps (City of New York)",
+            source="NYC Stormwater Flood Maps (Mayor's Office of Climate and Environmental Justice)",
             dataset=self.dataset,
             summary=f"The city's stormwater flood model for {self.title} maps " + "; ".join(parts),
             lat=nearest.y,

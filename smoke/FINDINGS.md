@@ -201,3 +201,10 @@ Third and fourth runs, with the tools (hosted Muse Spark 1.3, about 41 to 45 s a
 - **230 Court St:** Muse Spark checked the photo with SAM 3.1 ("sidewalk shed": not found), then read the complaint and both permits. The Jan 29, 2025 complaint ("Inadequate Defective/None") was closed the next day with no further action; two months later the photo shows no shed while the permit was valid.
 - **214 Court St:** it read the "218 Court Street" sign, confirmed the scaffolding with SAM 3.1 (0.55), and read the resolution of four outdoor dining "Sidewalk Zone Blocked" complaints at 208 Court St in April 2025.
 - **Bug in the rules, repeated by the model:** the agreement flag listed 224 Court St as "valid on 2025-03-30", but that permit ended 2025-03-27. Records came from a week around the photo and the flag treated all of them as valid on the day. Fixed: checks get only permits valid on the photo's day. Muse Spark is also told not to re-check what SAM 3.1 already looked for (it checked "sidewalk shed scaffolding" after "scaffolding").
+
+## Getting the city's stormwater flood maps (Oct 27, 2026)
+
+- The older single-scenario datasets on NYC Open Data (7r5q-vr7p, 5rzh-cyqd, w8eg-8ha6) now return HTTP 403.
+- The current collection, 9i7c-xyvv (`NYCFloodStormwaterFloodMaps.zip`, updated 2024-07-03, four scenarios including a new "Limited Flood, 1.77 in/hr"), holds **Esri compressed file geodatabases (CDF)**. GDAL's open-source OpenFileGDB driver cannot read them.
+- ArcGIS Online has many copies. The one web search found (organization `IsDCghZ73NgoYoz5`) is a university teaching account, not a city source. The city's copy is published by the account **`mocej.nyc.data`** (NYC Mayor's Office of Climate and Environmental Justice, which makes the maps).
+- **Decision:** the snapshot lists the climate office's ArcGIS services, picks each scenario by name, and asks only for the part inside the neighborhood. Evidence cites the Open Data collection page.

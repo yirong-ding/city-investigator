@@ -4,7 +4,5 @@ pillow>=10
 pillow-heif>=0.16
 requests>=2.31
 shapely>=2.0
-pyproj>=3.6
-pyogrio>=0.7
 tzdata>=2024.1
 pytest>=8

@@ -84,9 +84,16 @@ PERMIT_GAP_BRIDGE_DAYS = 30
 # A gap longer than this means the shed came down and a different one went up later.
 SEPARATE_SHED_DAYS = 180
 
-# NYC Stormwater Flood Maps: modeled rain-driven flooding in design storms, citywide. The city
-# publishes all scenarios as one collection; each is found in the download by words in its name.
+# NYC Stormwater Flood Maps: modeled rain-driven flooding in design storms, citywide. The Mayor's
+# Office of Climate and Environmental Justice (MOCEJ) publishes each scenario as an ArcGIS layer,
+# found among its services by words in the name. The same maps are on NYC Open Data (9i7c-xyvv),
+# but as Esri compressed geodatabases that open-source GIS libraries cannot read.
 STORMWATER_DATASET = "9i7c-xyvv"
+STORMWATER_PUBLISHER = {
+    "name": "NYC Mayor's Office of Climate and Environmental Justice",
+    "account": "mocej.nyc.data",
+    "services": "https://services6.arcgis.com/yG5s3afENB5iO9fj/arcgis/rest/services",
+}
 STORMWATER_SCENARIOS = [
     {"key": "limited_current", "match": ("limited", "current"), "title": "a limited storm (1.77 in/hr) with today's sea levels"},
     {"key": "moderate_current", "match": ("moderate", "current"), "title": "a moderate storm (2.13 in/hr) with today's sea levels"},

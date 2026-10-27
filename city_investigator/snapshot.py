@@ -4,8 +4,8 @@ Each dataset is saved to data/snapshots/<name>.json with the query used and the 
 it was retrieved, so investigations are reproducible and the demo works offline.
 Owner names are dropped before saving.
 
-The city's stormwater flood maps are one citywide download; the zip is kept in
-data/snapshots/raw/ and each scenario's layer is clipped to the neighborhood.
+The city's stormwater flood maps come from the ArcGIS layers its climate office
+publishes: only the part inside the neighborhood is requested, then clipped and merged.
 
 Usage:
   python -m city_investigator.snapshot
@@ -19,15 +19,13 @@ import argparse
 import csv
 import io
 import json
-import tempfile
+import re
 import time
-import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
 
 import requests
 
@@ -43,6 +41,7 @@ from city_investigator.config import (
     RAIN_START_YEAR,
     RAIN_STATION,
     STORMWATER_DATASET,
+    STORMWATER_PUBLISHER,
     STORMWATER_SCENARIOS,
 )
 from city_investigator.evidence import classify_complaint
@@ -50,9 +49,8 @@ from city_investigator.settings import SNAPSHOT_DIR, load_env
 from city_investigator.socrata import Socrata, SocrataError
 
 IEM_URL = "https://mesonet.agron.iastate.edu/cgi-bin/request/asos.py"
-OPEN_DATA = "https://data.cityofnewyork.us"
-ZIP_KINDS = ("application%2Fx-zip-compressed", "application%2Fzip")
-MAP_FILES = ("*.gdb", "*.gpkg", "*.shp", "*.geojson")
+ARCGIS_PAGE = 1000
+STORMWATER_SIMPLIFY_DEG = 0.000005  # about half a meter; the maps are drawn on a coarser grid
 
 
 def quoted(values: list[str]) -> str:
@@ -172,141 +170,94 @@ def fetch_rainfall(start_year: int, session: requests.Session | None = None) -> 
     return rows
 
 
-def download_candidates(dataset: str, session: requests.Session) -> tuple[list[str], dict[str, Any]]:
-    """Links that may serve a dataset's file attachment, from its metadata, plus what the metadata says."""
-    try:
-        response = session.get(f"{OPEN_DATA}/api/views/{dataset}.json", timeout=60)
-        meta = response.json() if response.ok else {}
-    except (requests.RequestException, ValueError):
-        meta = {}
-    details = meta.get("metadata") or {}
-    about = {key: meta[key] for key in ("name", "viewType", "assetType", "blobFilename") if meta.get(key)}
-    urls = []
-    if meta.get("blobId"):
-        name = quote(meta.get("blobFilename") or f"{dataset}.zip")
-        urls.append(f"{OPEN_DATA}/api/views/{dataset}/files/{meta['blobId']}?download=true&filename={name}")
-    attachments = details.get("attachments") or []
-    for attachment in attachments:
-        asset, name = attachment.get("assetId") or attachment.get("blobId"), attachment.get("filename") or attachment.get("name") or ""
-        if asset:
-            urls.append(f"{OPEN_DATA}/api/views/{dataset}/files/{asset}?download=true&filename={quote(name)}")
-    if attachments:
-        about["attachments"] = [attachment.get("filename") or attachment.get("name") for attachment in attachments]
-    access = details.get("accessPoints") or {}
-    if access:
-        about["accessPoints"] = access
-    urls += [url for url in access.values() if isinstance(url, str)]
-    urls += [f"{OPEN_DATA}/download/{dataset}/{kind}" for kind in ZIP_KINDS]
-    return list(dict.fromkeys(urls)), about
+def arcgis_json(session: requests.Session, url: str, **params: Any) -> dict[str, Any]:
+    response = session.get(url, params={"f": "json", **params}, timeout=600)
+    response.raise_for_status()
+    data = response.json()
+    if "error" in data:
+        raise RuntimeError(f"{url}: {data['error']}")
+    return data
 
 
-def download_zip(dataset: str, target: Path, session: requests.Session) -> Path:
-    """Download an NYC Open Data file attachment once; later runs reuse it."""
-    if target.is_file():
-        return target
-    target.parent.mkdir(parents=True, exist_ok=True)
-    partial = target.with_suffix(".part")
-    urls, about = download_candidates(dataset, session)
-    for url in urls:
-        with session.get(url, timeout=900, stream=True) as response:
-            if not response.ok:
-                print(f"      {url}: HTTP {response.status_code}")
-                continue
-            kind = response.headers.get("content-type", "unknown type")
-            with partial.open("wb") as out:
-                for chunk in response.iter_content(1 << 20):
-                    out.write(chunk)
-        with partial.open("rb") as check:
-            head = check.read(80)
-        if head[:2] == b"PK":
-            partial.replace(target)
-            return target
-        print(f"      {url}: {kind}, starts {head!r}")
-    partial.unlink(missing_ok=True)
-    raise RuntimeError(f"no zip file found for {dataset}; metadata: {json.dumps(about)[:300]}")
+def stormwater_layer(session: requests.Session, words: tuple[str, ...], services: list[dict[str, Any]]) -> str | None:
+    """The URL of the publisher's map layer whose name has all the words, or None."""
+    names = [
+        service["name"]
+        for service in services
+        if service.get("type") == "FeatureServer" and all(word in service["name"].lower() for word in words)
+    ]
+    if not names:
+        return None
+    service = f"{STORMWATER_PUBLISHER['services']}/{min(names, key=len)}/FeatureServer"  # skip copies such as _view
+    layers = arcgis_json(session, service).get("layers") or [{"id": 0}]
+    return f"{service}/{layers[0]['id']}"
 
 
-def map_layers(folder: Path) -> list[tuple[Path, str]]:
-    """Every map layer in an unpacked download, as (file, layer name); zips inside it are unpacked too."""
-    import pyogrio
-
-    for inner in sorted(folder.rglob("*.zip")):
-        with zipfile.ZipFile(inner) as opened:
-            opened.extractall(inner.with_suffix(""))
-    layers = []
-    for pattern in MAP_FILES:
-        for path in sorted(folder.rglob(pattern)):
-            layers += [(path, str(row[0])) for row in pyogrio.list_layers(path)]
-    return layers
+def flood_category(properties: dict[str, Any]) -> int | None:
+    key = next((key for key in properties if "categ" in key.lower()), None)
+    if key is None:
+        raise RuntimeError(f"no flooding category field; fields: {sorted(properties)}")
+    found = re.match(r"\s*(\d+)", str(properties[key]))
+    return int(found.group(1)) if found else None
 
 
-def match_layer(words: tuple[str, ...], layers: list[tuple[Path, str]]) -> tuple[Path, str] | None:
-    for path, layer in layers:
-        label = f"{path.stem} {layer}".lower()
-        if all(word in label for word in words):
-            return path, layer
-    return None
-
-
-def stormwater_features(path: Path, layer: str | None, bounds: tuple[float, float, float, float]) -> list[dict[str, Any]]:
-    """Flood polygons from one map layer, clipped to bounds (south, west, north, east), in longitude and latitude."""
+def stormwater_features(session: requests.Session, layer: str, bounds: tuple[float, float, float, float]) -> list[dict[str, Any]]:
+    """Flood polygons in bounds (south, west, north, east), clipped and merged by flooding category."""
     import numpy as np
-    import pyogrio
     import shapely
-    from pyproj import Transformer
+    from shapely.geometry import shape
 
     south, west, north, east = bounds
-    crs = pyogrio.read_info(path, layer=layer)["crs"]
-    xs, ys = Transformer.from_crs("EPSG:4326", crs, always_xy=True).transform(
-        [west, east, west, east], [south, south, north, north]
-    )
-    box = (min(xs), min(ys), max(xs), max(ys))
-    meta, _, geometries, fields = pyogrio.raw.read(path, layer=layer, bbox=box, force_2d=True)
-    names = [str(name) for name in meta["fields"]]
-    column = next((index for index, name in enumerate(names) if "categ" in name.lower()), None)
-    if column is None:
-        raise RuntimeError(f"no flooding category field in {path.name} / {layer}; fields: {names}")
-    to_degrees = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
-
-    def project(xy: Any) -> Any:
-        lon, lat = to_degrees.transform(xy[:, 0], xy[:, 1])
-        return np.round(np.column_stack((lon, lat)), 6)
-
-    features = []
-    for wkb, category in zip(geometries, fields[column]):
-        clipped = shapely.clip_by_rect(shapely.from_wkb(wkb), *box)
-        if not clipped.is_empty:
-            features.append({"category": int(category), "geometry": json.loads(shapely.to_geojson(shapely.transform(clipped, project)))})
-    return features
+    parts: dict[int, list[Any]] = {}
+    offset = 0
+    while True:
+        page = arcgis_json(
+            session, f"{layer}/query", f="geojson", where="1=1", outFields="*", returnGeometry="true",
+            geometry=f"{west},{south},{east},{north}", geometryType="esriGeometryEnvelope", inSR=4326,
+            spatialRel="esriSpatialRelIntersects", outSR=4326, geometryPrecision=6,
+            maxAllowableOffset=STORMWATER_SIMPLIFY_DEG, resultOffset=offset, resultRecordCount=ARCGIS_PAGE,
+        )
+        features = page.get("features") or []
+        for feature in features:
+            category = flood_category(feature.get("properties") or {})
+            if category is None or not feature.get("geometry"):
+                continue
+            clipped = shapely.clip_by_rect(shape(feature["geometry"]), west, south, east, north)
+            if not clipped.is_empty:
+                parts.setdefault(category, []).append(clipped)
+        more = page.get("exceededTransferLimit") or (page.get("properties") or {}).get("exceededTransferLimit")
+        if not features or not more:
+            break
+        offset += len(features)
+    merged = {
+        category: shapely.transform(shapely.union_all(pieces), lambda xy: np.round(xy, 6))
+        for category, pieces in parts.items()
+    }
+    return [{"category": category, "geometry": json.loads(shapely.to_geojson(geometry))} for category, geometry in sorted(merged.items())]
 
 
 def fetch_stormwater(folder: Path, session: requests.Session | None = None) -> dict[str, Any]:
     session = session or requests.Session()
-    raw = folder / "raw"
-    archive = download_zip(STORMWATER_DATASET, raw / f"stormwater_{STORMWATER_DATASET}.zip", session)
+    services = arcgis_json(session, STORMWATER_PUBLISHER["services"]).get("services") or []
     scenarios = []
-    # Unpack next to the snapshots: the system temp folder may be on a small drive.
-    with tempfile.TemporaryDirectory(dir=raw) as unpacked:
-        with zipfile.ZipFile(archive) as opened:
-            opened.extractall(unpacked)
-        layers = map_layers(Path(unpacked))
-        for scenario in STORMWATER_SCENARIOS:
-            found = match_layer(scenario["match"], layers)
-            if found is None:
-                print(f"      stormwater {scenario['key']}: not in the download")
-                continue
-            features = stormwater_features(*found, NEIGHBORHOOD["bounds"])
-            scenarios.append(
-                {key: value for key, value in scenario.items() if key != "match"}
-                | {"dataset": STORMWATER_DATASET, "layer": f"{found[0].name} / {found[1]}", "features": features}
-            )
-            print(f"      stormwater {scenario['key']}: {len(features)} flooding categories in the neighborhood")
+    for scenario in STORMWATER_SCENARIOS:
+        layer = stormwater_layer(session, scenario["match"], services)
+        if layer is None:
+            print(f"      stormwater {scenario['key']}: not published by {STORMWATER_PUBLISHER['account']}")
+            continue
+        features = stormwater_features(session, layer, NEIGHBORHOOD["bounds"])
+        scenarios.append(
+            {key: value for key, value in scenario.items() if key != "match"}
+            | {"dataset": STORMWATER_DATASET, "layer": layer, "features": features}
+        )
+        print(f"      stormwater {scenario['key']}: {len(features)} flooding categories in the neighborhood ({layer})")
     if not scenarios:
-        found_text = "; ".join(f"{path.name} / {layer}" for path, layer in layers) or "none"
-        raise RuntimeError(f"no flood map scenario matched; layers in the download: {found_text}"[:450])
+        names = ", ".join(service.get("name", "?") for service in services) or "none"
+        raise RuntimeError(f"no flood map scenario found; {STORMWATER_PUBLISHER['account']} publishes: {names}"[:450])
     return {
         "name": "stormwater",
         "dataset": STORMWATER_DATASET,
+        "publisher": STORMWATER_PUBLISHER,
         "bounds": NEIGHBORHOOD["bounds"],
         "retrieved_at": times.now().isoformat(),
         "scenarios": scenarios,

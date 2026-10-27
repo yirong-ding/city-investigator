@@ -165,3 +165,23 @@ def test_whole_investigation_runs_offline(store, tmp_path, monkeypatch):  # noqa
     assert result["shed_chains"][0]["up_since"] == "2025-09-01"
     run_dir = next((tmp_path / "out").iterdir())
     assert {path.name for path in run_dir.iterdir()} == {"photo.jpg", "overlay.png", "result.json"}
+
+
+def test_far_permits_do_not_contradict_the_photo():
+    permits = [evidence("dobnow:near", "shed_permit", address="230 COURT STREET"),
+               evidence("dobnow:far", "shed_permit", address="218 COURT STREET")]
+    when = datetime(2025, 3, 30, tzinfo=timezone.utc)
+    flags = sidewalk_checks([], permits, [], when, {"dobnow:near": 2.0, "dobnow:far": 48.0})
+    assert flags[0].type == "permit_without_structure"
+    assert "230 COURT STREET" in flags[0].message and "218 COURT STREET" not in flags[0].message
+    assert sidewalk_checks([], permits[1:], [], when, {"dobnow:far": 48.0}) == []
+
+
+def test_complaint_lag_separates_street_and_indoor():
+    when = datetime(2026, 8, 23, 10, 45, tzinfo=timezone.utc)
+    event = evidence("floodnet:1", "flood_event", when, "flooding")
+    indoor = evidence("311:a", "sewer_backup", when + timedelta(hours=3), "flooding")
+    street = evidence("311:b", "catch_basin", when + timedelta(hours=14, minutes=28), "flooding")
+    flag = next(f for f in flood_checks([], [event, indoor, street], 1.0, "found", when, when) if f.type == "complaints_lag_sensor")
+    assert "first street complaint came about 14 hours" in flag.message
+    assert "indoor sewer backup was reported about 3 hours" in flag.message

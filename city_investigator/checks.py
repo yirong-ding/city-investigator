@@ -19,6 +19,9 @@ STRUCTURE_SEEN = {"seen_scaffolding", "seen_construction_fence", "seen_construct
 WATER_SEEN = {"seen_water", "seen_puddle", "seen_standing_water"}
 FLOOD_COMPLAINTS = {"street_flooding", "catch_basin", "sewer_backup", "manhole_overflow"}
 DRY_RAIN_IN = 0.05
+# A permit farther than this from the camera may simply be out of frame.
+IN_VIEW_M = 20
+INDOOR_COMPLAINTS = {"sewer_backup"}
 MOMENT_TOLERANCE = timedelta(hours=12)
 
 
@@ -46,10 +49,14 @@ def sidewalk_checks(
     permits_at_photo: list[Evidence],
     chains: list[ShedChain],
     photo_time: datetime | None,
+    distances: dict[str, float] | None = None,
 ) -> list[Flag]:
+    """distances maps evidence IDs to meters from the camera."""
     flags: list[Flag] = []
+    distances = distances or {}
     seen = [item for item in observations if item.category in STRUCTURE_SEEN]
     sheds = [item for item in permits_at_photo if item.category in {"shed_permit", "scaffold_permit"}]
+    close_sheds = [item for item in sheds if distances.get(item.id, 0) <= IN_VIEW_M]
     when = f" on {day(photo_time)}" if photo_time else ""
     if seen and sheds:
         flags.append(Flag(
@@ -65,13 +72,14 @@ def sidewalk_checks(
             "It may be unpermitted, or its permit may be filed under another address.",
             ids(seen),
         ))
-    elif sheds:
+    elif close_sheds:
         flags.append(Flag(
             "permit_without_structure", CONFLICT,
-            f"Shed or scaffold permits were valid{when} at {addresses(sheds)}, but no scaffolding is visible. "
+            f"Shed or scaffold permits were valid{when} at {addresses(close_sheds)}, within {IN_VIEW_M} m of the "
+            "camera, but no scaffolding is visible. "
             "It may be on another side of the building, out of frame, or already taken down: a permit shows "
             "authorization, and DOB does not track whether a shed is physically up. The model can also miss it.",
-            ids(sheds),
+            ids(close_sheds),
         ))
     for chain in chains:
         if chain.short_gaps:
@@ -132,13 +140,22 @@ def flood_checks(
         ))
     if events and complaints:
         first_event = min(item.start for item in events if item.start)
-        first_complaint = min(item.start for item in complaints if item.start)
-        lag_hours = (first_complaint - first_event).total_seconds() / 3600
-        if lag_hours > 2:
+
+        def lag(items: list[Evidence]) -> float | None:
+            starts = [item.start for item in items if item.start]
+            return (min(starts) - first_event).total_seconds() / 3600 if starts else None
+
+        street_lag = lag([item for item in complaints if item.category not in INDOOR_COMPLAINTS])
+        indoor_lag = lag([item for item in complaints if item.category in INDOOR_COMPLAINTS])
+        parts = []
+        if street_lag is not None:
+            parts.append(f"the first street complaint came about {street_lag:.0f} hours after the sensor first recorded water")
+        if indoor_lag is not None:
+            parts.append(f"the first indoor sewer backup was reported about {indoor_lag:.0f} hours after")
+        if max(value for value in (street_lag, indoor_lag) if value is not None) > 2:
             flags.append(Flag(
                 "complaints_lag_sensor", AGREEMENT,
-                f"The sensor and the complaints agree that it flooded, but the first complaint came about "
-                f"{lag_hours:.0f} hours after the sensor first recorded water.",
+                "The sensor and the complaints agree that it flooded, but " + "; ".join(parts) + ".",
                 ids(events) + ids(complaints),
             ))
     return flags

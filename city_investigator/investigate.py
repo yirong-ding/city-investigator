@@ -300,9 +300,15 @@ def print_report(result: dict[str, Any]) -> None:
         print(f"\nRecurrence ({rec['definition']})")
         sensor = rec["floodnet"]
         names = ", ".join(f"{s['name']} (since {s['installed']})" for s in sensor["sensors"]) or "no sensor in range"
-        print(f"  FloodNet: {sensor['events']} events on {sensor['days']} days, deepest {sensor['deepest_in']} in; sensors: {names}")
+        def verdict(source: dict[str, Any]) -> str:
+            return "recurring by this definition" if source["recurring"] else "not recurring by this definition"
+
+        print(f"  FloodNet: {sensor['events']} events on {sensor['days']} days, deepest {sensor['deepest_in']} in: {verdict(sensor)}; sensors: {names}")
         street = rec["street_flood_complaints"]
-        print(f"  311 street flooding and catch basins: {street['complaints']} complaints on {street['days']} days ({street['first']} to {street['last']})")
+        print(
+            f"  311 street flooding and catch basins: {street['complaints']} complaints on {street['days']} days "
+            f"({street['first']} to {street['last']}): {verdict(street)}"
+        )
         print(f"  311 indoor sewer backups: {rec['indoor_sewer_backup_complaints']['complaints']} complaints")
     print("\nCoverage")
     for item in result["coverage"]:
@@ -330,7 +336,8 @@ async def investigate(args: argparse.Namespace) -> dict[str, Any]:
     extra: dict[str, Any] = {}
     if topic == "sidewalk":
         hits, coverage, chains, permits_at_photo = gather_sidewalk(store, photo.lat, photo.lon, radius, when)
-        flags: list[Flag] = sidewalk_checks(observations, permits_at_photo, chains, when)
+        distances = {hit.evidence.id: hit.distance_m for hit in hits if hit.distance_m is not None}
+        flags: list[Flag] = sidewalk_checks(observations, permits_at_photo, chains, when, distances)
         extra["shed_chains"] = [chain.to_dict(times.now()) for chain in chains]
     else:
         hits, coverage, rec, rain_before, sensor_state = gather_flooding(store, photo.lat, photo.lon, radius, when)

@@ -263,3 +263,43 @@ def test_floors_are_whole_numbers():
     assert floors_text("1.0000000") == "1 floor"
     assert floors_text("4.5") == "4.5 floors"
     assert floors_text("0") is None
+
+
+class FakeResponse:
+    def __init__(self, body):
+        self.body = body
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self.body
+
+
+class FakeSession:
+    def __init__(self, bodies):
+        self.bodies = list(bodies)
+        self.params = []
+
+    def get(self, url, params, timeout):
+        self.params.append(params)
+        return FakeResponse(self.bodies.pop(0))
+
+
+def test_photo_search_asks_for_many_and_retries_empty_answers(monkeypatch):
+    from city_investigator import photos
+
+    monkeypatch.setattr(photos.time, "sleep", lambda seconds: None)
+    item = {"id": "1", "captured_at": 1755936000000, "computed_geometry": {"coordinates": [-73.983, 40.6787]}}
+    session = FakeSession([{"data": []}, {"data": [item]}])
+    found = photos.photos_near(*CORNER, token="t", session=session)
+    assert len(found) == 1 and len(session.params) == 2
+    assert session.params[0]["limit"] >= 1000
+
+
+def test_photo_search_reports_errors_instead_of_no_photos():
+    from city_investigator import photos
+
+    session = FakeSession([{"error": {"message": "rate limit"}}])
+    with pytest.raises(RuntimeError, match="Mapillary error"):
+        photos.photos_near(*CORNER, token="t", session=session)

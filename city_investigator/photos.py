@@ -7,6 +7,7 @@ and share edited versions (such as mask overlays) under the same license.
 from __future__ import annotations
 
 import os
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -48,26 +49,38 @@ def photos_near(
     lat: float,
     lon: float,
     radius_m: float = 40,
-    limit: int = 50,
+    limit: int = 2000,
     token: str | None = None,
     session: requests.Session | None = None,
+    retries: int = 1,
 ) -> list[dict[str, Any]]:
-    """Photos within radius_m, newest first. Image URLs expire; page URLs do not."""
+    """Photos within radius_m, newest first. Image URLs expire; page URLs do not.
+
+    A small limit makes Mapillary return an arbitrary subset of the photos in the box,
+    so ask for many. An empty answer is retried once, since searches sometimes time out
+    quietly.
+    """
     token = token or os.environ.get("MAPILLARY_TOKEN")
     if not token:
         raise RuntimeError("MAPILLARY_TOKEN is not set")
+    session = session or requests.Session()
     min_lon, min_lat, max_lon, max_lat = bbox(lat, lon, radius_m)
-    response = (session or requests.Session()).get(
-        API,
-        params={
-            "access_token": token,
-            "fields": FIELDS,
-            "bbox": f"{min_lon:.6f},{min_lat:.6f},{max_lon:.6f},{max_lat:.6f}",
-            "limit": limit,
-        },
-        timeout=30,
-    )
-    response.raise_for_status()
-    photos = [photo for item in response.json().get("data", []) if (photo := parse_photo(item, lat, lon))]
+    params = {
+        "access_token": token,
+        "fields": FIELDS,
+        "bbox": f"{min_lon:.6f},{min_lat:.6f},{max_lon:.6f},{max_lat:.6f}",
+        "limit": limit,
+    }
+    for attempt in range(retries + 1):
+        response = session.get(API, params=params, timeout=60)
+        response.raise_for_status()
+        body = response.json()
+        if "error" in body:
+            raise RuntimeError(f"Mapillary error: {str(body['error'])[:200]}")
+        items = body.get("data", [])
+        if items or attempt == retries:
+            break
+        time.sleep(1)
+    photos = [photo for item in items if (photo := parse_photo(item, lat, lon))]
     photos = [photo for photo in photos if photo["distance_m"] <= radius_m]
     return sorted(photos, key=lambda photo: photo["captured_at"] or "", reverse=True)

@@ -88,11 +88,31 @@ def flood_sites(store: Store, top: int) -> list[dict[str, Any]]:
 
 
 def add_photos(sites: list[dict[str, Any]], keep: int = 5) -> None:
+    """Keep the newest photos plus the oldest one, which often shows the street before."""
     for site in sites:
         try:
-            site["photos"] = photos_near(site["lat"], site["lon"], PHOTO_RADIUS_M)[:keep]
+            photos = photos_near(site["lat"], site["lon"], PHOTO_RADIUS_M)
         except Exception as error:  # one failed search should not stop the shortlist
             site["photos_error"] = f"{type(error).__name__}: {error}"[:300]
+            continue
+        chosen = photos[: keep - 1] + photos[-1:] if len(photos) > keep else photos
+        years = sorted({(photo["captured_at"] or "")[:4] for photo in photos if photo["captured_at"]})
+        site["photo_count"] = len(photos)
+        site["photo_years"] = f"{years[0]} to {years[-1]}" if years else None
+        site["photos"] = [photo | {"when": photo_period(photo, site)} for photo in chosen]
+
+
+def photo_period(photo: dict[str, Any], site: dict[str, Any]) -> str | None:
+    """For a shed site: was the photo taken before the permits or while they were valid?"""
+    taken = (photo.get("captured_at") or "")[:10]
+    since, until = site.get("up_since"), site.get("permit_valid_until")
+    if not taken or not since:
+        return None
+    if taken < since:
+        return "before the current shed permits"
+    if until and taken <= until:
+        return "while shed permits were valid"
+    return "after the permits"
 
 
 def photo_lines(site: dict[str, Any]) -> list[str]:
@@ -102,10 +122,13 @@ def photo_lines(site: dict[str, Any]) -> list[str]:
         return []
     if not site["photos"]:
         return [f"  - No Mapillary photos within {PHOTO_RADIUS_M} m."]
-    return [
-        f"  - [{(photo['captured_at'] or 'undated')[:10]}, {photo['distance_m']} m away]({photo['page_url']}): {photo['credit']}"
-        for photo in site["photos"]
-    ]
+    lines = [f"  - {site['photo_count']} photos within {PHOTO_RADIUS_M} m, taken {site['photo_years']}; newest and oldest:"]
+    for photo in site["photos"]:
+        when = f", {photo['when']}" if photo.get("when") else ""
+        lines.append(
+            f"  - [{(photo['captured_at'] or 'undated')[:10]}, {photo['distance_m']} m away{when}]({photo['page_url']}): {photo['credit']}"
+        )
+    return lines
 
 
 def to_markdown(sheds: list[dict[str, Any]], floods: list[dict[str, Any]], generated: datetime) -> str:

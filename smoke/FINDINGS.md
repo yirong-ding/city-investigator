@@ -93,3 +93,45 @@ Southeast Queens has 3 to 6 times more flood complaints. Gowanus is still the be
 | Open-Meteo archive | model | 0.42 in | 0.157 in/hr at 08:00 local |
 
 The measurement and the model disagree by more than half, which is why rainfall must carry its label. Flooding at Carroll St/4th Av started at 11:32 UTC (07:32 local), during the peak hour, so converting UTC to local time lines the sources up. Central Park is several kilometers from Gowanus; a closer station would be better.
+
+# Day 2 findings: the data layer on real data (Oct 27, 2026)
+
+## Snapshot
+
+| Dataset | Rows |
+|---|---|
+| 311 since 2020 (flooding and sidewalk types, Brooklyn CB 6) | 13,591 |
+| 311 flooding, 2010s | 2,800 |
+| DOB NOW shed, scaffold and fence permits (board 306) | 7,835 |
+| Older DOB permits (board 306) | 11,473 |
+| FloodNet sensors / events (BK06) | 16 / 83 |
+| PLUTO lots (cd 306) | 13,764 |
+| Hourly rain, Central Park, since 2020 | 59,524 |
+
+All field-name guesses held: every dataset downloaded on the first run.
+
+## Coverage logic on real data
+
+A lookup at 40.6787, -73.9830 (about 290 m from the real Carroll St/4th Av sensor at 40.676281, -73.984089) correctly reported no FloodNet sensor within 150 m and named the nearest, 3rd Ave/Union St at 197 m. Rain for Aug 22 to 26, 2026 matched the Day 1 smoke test: 0.96 in, peak 0.49 in/hr in the hour ending 07:51.
+
+## Demo candidates
+
+**Sidewalk sheds (permits active on Oct 27, 2026):**
+
+| Site | Permitted since | 311 complaints within 50 m since then | Mapillary photos |
+|---|---|---|---|
+| 433 Dean St | 2020-09-01 (6.2 years) | shed 17, construction blocking 16, sidewalk 7 | 2018 to 2019 (before the permits) |
+| 596 Baltic St | 2022-10-04 (4.1 years) | shed 12 | 2020, 6 m away (before) |
+| 230 Court St | 2022-07-14 (4.3 years) | shed 2, construction blocking 2 | 2025-03-30, 8 m away (while permits were valid) |
+| 431 Hicks St | 2019-11-08 (7.0 years, longest) | sidewalk 3, shed 1 | 2018 to 2022 |
+
+**Flood corners:**
+
+| Sensor | Events | Deepest | 311 flood complaints within 150 m since install | Notes |
+|---|---|---|---|---|
+| Carroll St/4th Av | 13 | 35.94 in | 55 | 2024 Mapillary photos nearby; main flood demo |
+| 9th St/Smith St | 14 | 27.76 in | 9 | Includes Hurricane Ida (2021-09-02) |
+| Hoyt St/5th St | 29 | 10.35 in | 6 | Most events but few complaints: a reporting-gap example |
+| 4th Av/Garfield Pl | 4 | 16.42 in | 53 | Next to Carroll St/4th Av |
+
+Hoyt St/5th St (29 sensor events, 6 complaints) against Carroll St/4th Av (13 events, 55 complaints) is a ready example of why complaint counts and sensor counts must be read separately.

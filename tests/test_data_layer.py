@@ -246,3 +246,20 @@ def test_old_window_has_no_review_warning(store):
 def test_install_dates_are_new_york_calendar_dates(store):
     sensor = next(s for s in store.sensors if s.id == "s0")
     assert times.to_local(sensor.installed).date() == date(2021, 6, 1)
+
+
+def test_photo_period_relative_to_shed_permits():
+    from city_investigator.shortlist import photo_period
+
+    site = {"up_since": "2022-07-14", "permit_valid_until": "2026-12-31"}
+    assert photo_period({"captured_at": "2025-03-30T10:00:00+00:00"}, site) == "while shed permits were valid"
+    assert photo_period({"captured_at": "2020-02-12T10:00:00+00:00"}, site) == "before the current shed permits"
+    assert photo_period({"captured_at": "2020-02-12T10:00:00+00:00"}, {}) is None
+
+
+def test_floors_are_whole_numbers():
+    from city_investigator.evidence import floors_text
+
+    assert floors_text("1.0000000") == "1 floor"
+    assert floors_text("4.5") == "4.5 floors"
+    assert floors_text("0") is None

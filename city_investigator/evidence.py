@@ -299,6 +299,14 @@ def from_floodnet_event(row: dict[str, Any], sensors: dict[str, Sensor], dataset
     )
 
 
+def floors_text(value: Any) -> str | None:
+    floors = to_float(value)
+    if not floors:
+        return None
+    count = int(floors) if floors.is_integer() else floors
+    return f"{count} floor" if count == 1 else f"{count} floors"
+
+
 def from_pluto(row: dict[str, Any], dataset: str) -> Evidence | None:
     bbl = norm_bbl(row.get("bbl"))
     if not bbl:
@@ -307,7 +315,7 @@ def from_pluto(row: dict[str, Any], dataset: str) -> Evidence | None:
     details = [
         f"building class {row['bldgclass']}" if row.get("bldgclass") else None,
         f"built {row['yearbuilt']}" if str(row.get("yearbuilt") or "0") not in {"0", ""} else None,
-        f"{row['numfloors']} floors" if row.get("numfloors") else None,
+        floors_text(row.get("numfloors")),
         OWNER_TYPES.get(str(row.get("ownertype") or "").strip(), None),
         f"zoning {row['zonedist1']}" if row.get("zonedist1") else None,
     ]

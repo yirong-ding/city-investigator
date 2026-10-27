@@ -20,6 +20,10 @@ dist/
 # Unblurred original photos never leave the machine
 data/private/
 
+# Downloaded city data and files made from it (rebuilt by the snapshot command)
+data/snapshots/
+data/derived/
+
 # Local caches and smoke-test output
 .cache/
 smoke/results/

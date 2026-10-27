@@ -4,7 +4,7 @@
 
 Built for the Meta Global AI Developer Hackathon (Oct 26 to Nov 4, 2026).
 
-> **Status:** Day 1. Smoke tests for the Meta APIs and NYC data are in [`smoke/`](smoke/README.md).
+> **Status:** Day 2. The data layer is in [`city_investigator/`](city_investigator/); the Day 1 smoke tests and findings are in [`smoke/`](smoke/README.md).
 
 ## What it does
 
@@ -45,6 +45,18 @@ python -m pytest tests # offline checks, no key needed
 ```
 
 Then run the [Day 1 smoke tests](smoke/README.md).
+
+## Data layer
+
+```bash
+python -m city_investigator.snapshot            # download Brooklyn Community District 6 records
+python -m city_investigator.shortlist --photos  # candidate demo sites, with Mapillary photos
+python -m city_investigator.lookup --lat 40.6787 --lon -73.9830 --start 2026-08-22 --end 2026-08-26 --topic flooding
+```
+
+- **Snapshot** saves 311 complaints (2020 on, plus flooding from the 2010s), DOB shed, scaffold and fence permits, FloodNet sensors and flood events, PLUTO property data, and hourly rain at the Central Park weather station to `data/snapshots/`, each with its query and download time. Owner names are dropped. Run `--only NAME` to refresh one dataset.
+- **Lookup** returns the records near a point and time window (or for one building) and, for every source, a coverage note that separates "searched and found nothing" from "no data could exist here", such as a flood sensor installed after the storm in question.
+- **Shortlist** ranks the longest-standing sheds (chaining 90-day permits and bridging gaps up to 30 days) and the most-flooded sensor corners, with Street View links for scouting by eye and nearby Mapillary photos the app can use with credit.
 
 Never commit `.env`; it is listed in `.gitignore`.
 

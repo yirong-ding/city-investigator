@@ -15,6 +15,8 @@ NEIGHBORHOOD = {
     "board_dob": "306",
     "district_floodnet": "BK06",
     "pluto_cd": "306",
+    # Generous bounds (south, west, north, east) for clipping citywide map layers.
+    "bounds": (40.650, -74.030, 40.700, -73.960),
 }
 
 DATASETS = {
@@ -81,3 +83,15 @@ RAIN_START_YEAR = 2020
 PERMIT_GAP_BRIDGE_DAYS = 30
 # A gap longer than this means the shed came down and a different one went up later.
 SEPARATE_SHED_DAYS = 180
+
+# NYC Stormwater Flood Maps: modeled rain-driven flooding in design storms, citywide.
+STORMWATER_SCENARIOS = [
+    {"key": "moderate_current", "dataset": "7r5q-vr7p", "title": "a moderate storm (2.13 in/hr) with today's sea levels"},
+    {"key": "moderate_2050", "dataset": "5rzh-cyqd", "title": "a moderate storm (2.13 in/hr) with 2050 sea level rise"},
+    {"key": "extreme_2080", "dataset": "w8eg-8ha6", "title": "an extreme storm (3.66 in/hr) with 2080 sea level rise"},
+]
+STORMWATER_CATEGORIES = {
+    1: "nuisance flooding (4 in to 1 ft deep)",
+    2: "deep and contiguous flooding (1 ft or deeper)",
+    3: "flooding from future high tides",
+}

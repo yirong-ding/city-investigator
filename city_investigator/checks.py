@@ -23,6 +23,9 @@ DRY_RAIN_IN = 0.05
 IN_VIEW_M = 20
 INDOOR_COMPLAINTS = {"sewer_backup"}
 MOMENT_TOLERANCE = timedelta(hours=12)
+# Modeled flooding this close to the place counts as the model expecting flooding there.
+MODEL_NEAR_M = 50
+CURRENT_SCENARIO = "moderate_current"
 
 
 @dataclass
@@ -99,7 +102,9 @@ def flood_checks(
     sensor_coverage_state: str | None,
     photo_time: datetime | None,
     when: datetime | None,
+    model_coverage_state: str | None = None,
 ) -> list[Flag]:
+    """moment_hits are records around the moment asked about, plus the flood model's estimates."""
     flags: list[Flag] = []
     water = [item for item in observations if item.category in WATER_SEEN]
     events = [item for item in moment_hits if item.category == "flood_event"]
@@ -158,4 +163,24 @@ def flood_checks(
                 "The sensor and the complaints agree that it flooded, but " + "; ".join(parts) + ".",
                 ids(events) + ids(complaints),
             ))
+    recorded = events + [item for item in complaints if item.category not in INDOOR_COMPLAINTS]
+    modeled = next(
+        (item for item in moment_hits if item.category == "modeled_flooding" and item.raw.get("scenario") == CURRENT_SCENARIO),
+        None,
+    )
+    if recorded and modeled and min(modeled.raw["distances_m"].values()) <= MODEL_NEAR_M:
+        flags.append(Flag(
+            "model_expects_flooding", AGREEMENT,
+            f"The city's stormwater flood model also maps flooding within {MODEL_NEAR_M} m of here in a moderate "
+            "storm with today's sea levels: this is a place the city expects to flood.",
+            ids(recorded) + [modeled.id],
+        ))
+    elif recorded and model_coverage_state in {"found", "nothing_found"}:
+        flags.append(Flag(
+            "model_misses_flooding", GAP,
+            f"Flooding was recorded here, but the city's stormwater flood model for a moderate storm with today's "
+            f"sea levels maps none within {MODEL_NEAR_M} m. The model maps only ponding at least 4 in deep over a "
+            "quarter acre, so smaller, brief or very local flooding can be missing from it.",
+            ids(recorded),
+        ))
     return flags

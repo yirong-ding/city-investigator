@@ -199,3 +199,19 @@ def test_only_permits_valid_on_the_photo_day_reach_the_checks(store):  # noqa: F
     ]
     _, _, _, valid = inv.gather_sidewalk(store, *SHED, 50, inv.parse_local("2025-03-31"))
     assert len(valid) == 1  # the last day of a permit still counts
+
+
+def test_flood_model_is_compared_with_recorded_flooding():
+    when = datetime(2026, 8, 23, 10, 45, tzinfo=timezone.utc)
+    event = evidence("floodnet:1", "flood_event", when, "flooding")
+    indoor = evidence("311:a", "sewer_backup", when + timedelta(hours=3), "flooding")
+    model = Evidence("stormwater:moderate_current", "model", "flooding", "modeled_flooding", "test", "test", "m",
+                     None, None, "model", None, None, "", raw={"scenario": "moderate_current", "distances_m": {"1": 0.0}})
+
+    def types(hits, model_state):
+        return {f.type for f in flood_checks([], hits, 1.0, "found", when, when, model_state)}
+
+    assert "model_expects_flooding" in types([event, model], "found")
+    assert "model_misses_flooding" in types([event], "nothing_found")
+    assert not {"model_expects_flooding", "model_misses_flooding"} & types([event], None)  # maps not loaded
+    assert not {"model_expects_flooding", "model_misses_flooding"} & types([indoor], "nothing_found")  # indoor only

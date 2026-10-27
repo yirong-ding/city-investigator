@@ -4,9 +4,13 @@ Each dataset is saved to data/snapshots/<name>.json with the query used and the 
 it was retrieved, so investigations are reproducible and the demo works offline.
 Owner names are dropped before saving.
 
+The city's stormwater flood maps are citywide map files; the zips are kept in
+data/snapshots/raw/ and each layer is clipped to the neighborhood.
+
 Usage:
   python -m city_investigator.snapshot
   python -m city_investigator.snapshot --only floodnet_sensors --only floodnet_events
+  python -m city_investigator.snapshot --only stormwater
 """
 
 from __future__ import annotations
@@ -15,7 +19,9 @@ import argparse
 import csv
 import io
 import json
+import tempfile
 import time
+import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
@@ -35,12 +41,16 @@ from city_investigator.config import (
     PERMIT_WORK_TYPES,
     RAIN_START_YEAR,
     RAIN_STATION,
+    STORMWATER_SCENARIOS,
 )
 from city_investigator.evidence import classify_complaint
 from city_investigator.settings import SNAPSHOT_DIR, load_env
 from city_investigator.socrata import Socrata, SocrataError
 
 IEM_URL = "https://mesonet.agron.iastate.edu/cgi-bin/request/asos.py"
+OPEN_DATA_DOWNLOAD = "https://data.cityofnewyork.us/download/{dataset}/{kind}"
+ZIP_KINDS = ("application%2Fx-zip-compressed", "application%2Fzip")
+MAP_FILES = ("*.gdb", "*.gpkg", "*.shp", "*.geojson")
 
 
 def quoted(values: list[str]) -> str:
@@ -160,6 +170,83 @@ def fetch_rainfall(start_year: int, session: requests.Session | None = None) -> 
     return rows
 
 
+def download_zip(dataset: str, target: Path, session: requests.Session) -> Path:
+    """Download an NYC Open Data file attachment once; later runs reuse it."""
+    if target.is_file():
+        return target
+    target.parent.mkdir(parents=True, exist_ok=True)
+    partial = target.with_suffix(".part")
+    problems = []
+    for kind in ZIP_KINDS:
+        with session.get(OPEN_DATA_DOWNLOAD.format(dataset=dataset, kind=kind), timeout=900, stream=True) as response:
+            if not response.ok:
+                problems.append(f"HTTP {response.status_code}")
+                continue
+            with partial.open("wb") as out:
+                for chunk in response.iter_content(1 << 20):
+                    out.write(chunk)
+        with partial.open("rb") as check:
+            if check.read(2) == b"PK":
+                partial.replace(target)
+                return target
+        problems.append("not a zip file")
+    partial.unlink(missing_ok=True)
+    raise RuntimeError(f"could not download {dataset}: {', '.join(problems)}")
+
+
+def stormwater_features(path: Path, bounds: tuple[float, float, float, float]) -> list[dict[str, Any]]:
+    """Flood polygons from one map layer, clipped to bounds (south, west, north, east), in longitude and latitude."""
+    import numpy as np
+    import pyogrio
+    import shapely
+    from pyproj import Transformer
+
+    south, west, north, east = bounds
+    crs = pyogrio.read_info(path)["crs"]
+    xs, ys = Transformer.from_crs("EPSG:4326", crs, always_xy=True).transform(
+        [west, east, west, east], [south, south, north, north]
+    )
+    box = (min(xs), min(ys), max(xs), max(ys))
+    meta, _, geometries, fields = pyogrio.raw.read(path, bbox=box, force_2d=True)
+    names = [str(name).lower() for name in meta["fields"]]
+    categories = fields[names.index("flooding_category")]
+    to_degrees = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
+
+    def project(xy: Any) -> Any:
+        lon, lat = to_degrees.transform(xy[:, 0], xy[:, 1])
+        return np.round(np.column_stack((lon, lat)), 6)
+
+    features = []
+    for wkb, category in zip(geometries, categories):
+        clipped = shapely.clip_by_rect(shapely.from_wkb(wkb), *box)
+        if not clipped.is_empty:
+            features.append({"category": int(category), "geometry": json.loads(shapely.to_geojson(shapely.transform(clipped, project)))})
+    return features
+
+
+def fetch_stormwater(folder: Path, session: requests.Session | None = None) -> dict[str, Any]:
+    session = session or requests.Session()
+    scenarios = []
+    for scenario in STORMWATER_SCENARIOS:
+        archive = download_zip(scenario["dataset"], folder / "raw" / f"stormwater_{scenario['key']}.zip", session)
+        with tempfile.TemporaryDirectory() as unpacked:
+            with zipfile.ZipFile(archive) as opened:
+                opened.extractall(unpacked)
+            layer = next((found for pattern in MAP_FILES for found in sorted(Path(unpacked).rglob(pattern))), None)
+            if layer is None:
+                raise RuntimeError(f"no map layer in {archive.name}")
+            features = stormwater_features(layer, NEIGHBORHOOD["bounds"])
+        scenarios.append(scenario | {"features": features})
+        print(f"      stormwater {scenario['key']}: {len(features)} flooding categories in the neighborhood")
+    return {
+        "name": "stormwater",
+        "dataset": ", ".join(scenario["dataset"] for scenario in STORMWATER_SCENARIOS),
+        "bounds": NEIGHBORHOOD["bounds"],
+        "retrieved_at": times.now().isoformat(),
+        "scenarios": scenarios,
+    }
+
+
 def save(folder: Path, name: str, payload: dict[str, Any]) -> None:
     folder.mkdir(parents=True, exist_ok=True)
     (folder / f"{name}.json").write_text(json.dumps(payload))
@@ -206,6 +293,15 @@ def run(only: list[str] | None, folder: Path = SNAPSHOT_DIR, client: Socrata | N
         except Exception as error:
             entries["rainfall"] = {"ok": False, "error": f"{type(error).__name__}: {error}"[:500]}
             print(f"FAIL  rainfall: {entries['rainfall']['error']}")
+    if not only or "stormwater" in only:
+        try:
+            payload = fetch_stormwater(folder)
+            save(folder, "stormwater", payload)
+            entries["stormwater"] = {"ok": True, "dataset": payload["dataset"], "scenarios": len(payload["scenarios"]), "retrieved_at": payload["retrieved_at"]}
+            print(f"OK    stormwater: {len(payload['scenarios'])} flood map scenarios")
+        except Exception as error:
+            entries["stormwater"] = {"ok": False, "error": f"{type(error).__name__}: {error}"[:500]}
+            print(f"FAIL  stormwater: {entries['stormwater']['error']}")
     update_manifest(folder, entries)
     return entries
 

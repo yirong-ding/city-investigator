@@ -349,7 +349,10 @@ async def investigate(args: argparse.Namespace) -> dict[str, Any]:
         extra["shed_chains"] = [chain.to_dict(times.now()) for chain in chains]
     else:
         hits, coverage, rec, rain_before, sensor_state = gather_flooding(store, photo.lat, photo.lon, radius, when)
-        flags = flood_checks(observations, [hit.evidence for hit in hits], rain_before, sensor_state, photo.taken_at, when)
+        model_state = next((c.state for c in coverage if c.source == "City stormwater flood maps"), None)
+        flags = flood_checks(
+            observations, [hit.evidence for hit in hits], rain_before, sensor_state, photo.taken_at, when, model_state
+        )
         extra["recurrence"] = rec
         extra["rain_in_24h_before"] = rain_before
 

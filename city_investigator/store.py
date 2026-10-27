@@ -30,6 +30,7 @@ from city_investigator.evidence import (
     from_pluto,
     sensor_from_row,
 )
+from city_investigator.floodmap import MODEL_NOTE, FloodMap
 from city_investigator.geo import distance_m
 from city_investigator.settings import SNAPSHOT_DIR
 
@@ -109,6 +110,7 @@ class Store:
         periods_311: dict[str, list[tuple[datetime, datetime]]],
         loaded: set[str],
         floodnet_retrieved: datetime | None = None,
+        flood_maps: list[FloodMap] | None = None,
     ) -> None:
         self.evidence = evidence
         self.lots = lots
@@ -118,6 +120,7 @@ class Store:
         self.periods_311 = periods_311
         self.loaded = loaded
         self.floodnet_retrieved = floodnet_retrieved
+        self.flood_maps = flood_maps or []
 
     @classmethod
     def load(cls, folder: Path = SNAPSHOT_DIR) -> Store:
@@ -177,7 +180,13 @@ class Store:
                 if moment:
                     rain.append((moment, float(row["inches"])))
 
-        return cls(evidence, lots, sensors, rain, periods, loaded, floodnet_retrieved)
+        flood_maps: list[FloodMap] = []
+        stormwater = read("stormwater")
+        if stormwater:
+            loaded.add("stormwater")
+            flood_maps = [FloodMap.from_dict(scenario) for scenario in stormwater["scenarios"]]
+
+        return cls(evidence, lots, sensors, rain, periods, loaded, floodnet_retrieved, flood_maps)
 
     # Lookups
 
@@ -208,6 +217,9 @@ class Store:
                 hits.append(rain_hit)
             if rain_coverage:
                 coverage.append(rain_coverage)
+            model_hits, model_coverage = self._stormwater(lat, lon, radius_m)
+            hits += model_hits
+            coverage.append(model_coverage)
         if "sidewalk" in topics:
             coverage.append(self._complaint_coverage("sidewalk", hits, radius_m, start, end))
             coverage.append(self._permit_coverage(hits, radius_m, start, end))
@@ -429,10 +441,32 @@ class Store:
         return Hit(summary, station_km * 1000), Coverage(label, FOUND, note)
 
 
+    def _stormwater(self, lat: float, lon: float, radius_m: float) -> tuple[list[Hit], Coverage]:
+        label = "City stormwater flood maps"
+        if "stormwater" not in self.loaded:
+            return [], Coverage(
+                label, NO_COVERAGE, "The city's stormwater flood maps are not loaded; run the snapshot with --only stormwater."
+            )
+        hits = [
+            Hit(item, distance_m(lat, lon, item.lat, item.lon))
+            for flood_map in self.flood_maps
+            if (item := flood_map.evidence(lat, lon, radius_m)) and item.lat is not None and item.lon is not None
+        ]
+        if hits:
+            return hits, Coverage(label, FOUND, MODEL_NOTE)
+        return [], Coverage(
+            label,
+            NOTHING_FOUND,
+            f"No modeled flooding within {radius_m:.0f} m in any of the {plural(len(self.flood_maps), 'scenario')}. "
+            + MODEL_NOTE,
+        )
+
+
 def plural(count: int, word: str) -> str:
     return f"{count} {word}" if count == 1 else f"{count} {word}s"
 
 
 def sort_key(hit: Hit) -> tuple[int, float]:
     started = hit.evidence.start.timestamp() if hit.evidence.start else 0.0
-    return (0 if hit.evidence.topic == "context" else 1, -started)
+    # Lots and models have no date; list them first so a cap on records never drops them.
+    return (0 if hit.evidence.topic == "context" or hit.evidence.kind == "model" else 1, -started)

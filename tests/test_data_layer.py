@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import math
+import zipfile
 from datetime import date, datetime, timezone
 
 import pytest
@@ -14,7 +16,7 @@ from city_investigator.photos import parse_photo
 from city_investigator.sheds import build_chains
 from city_investigator.shortlist import flood_sites, shed_sites
 from city_investigator.socrata import SocrataError
-from city_investigator.store import FOUND, NO_COVERAGE, Store
+from city_investigator.store import FOUND, NO_COVERAGE, NOTHING_FOUND, Store
 
 CORNER = (40.6787, -73.9830)  # made-up "Test St/Example Av" corner
 SHED = (40.6800, -73.9850)
@@ -24,6 +26,13 @@ NOW = datetime(2026, 10, 27, 12, tzinfo=timezone.utc)
 def write(folder, name, rows, dataset="test-set"):
     payload = {"name": name, "dataset": dataset, "retrieved_at": "2026-10-27T12:00:00+00:00", "rows": rows}
     (folder / f"{name}.json").write_text(json.dumps(payload))
+
+
+def square(lat, lon, half_m):
+    """A GeoJSON square, half_m meters from its center to each side."""
+    dlat, dlon = half_m / 110_574, half_m / (111_320 * math.cos(math.radians(40.675)))
+    ring = [[lon - dlon, lat - dlat], [lon + dlon, lat - dlat], [lon + dlon, lat + dlat], [lon - dlon, lat + dlat]]
+    return {"type": "Polygon", "coordinates": [ring + ring[:1]]}
 
 
 def permit(start, end, bin_="3000001", work_type="Sidewalk Shed"):
@@ -86,6 +95,14 @@ def store(tmp_path):
         {"valid_utc": "2026-08-23 10:51", "inches": 0.30},
         {"valid_utc": "2026-08-23 11:51", "inches": 0.49},
     ])
+    north_of_corner = (CORNER[0] + 60 / 110_574, CORNER[1])
+    (tmp_path / "stormwater.json").write_text(json.dumps({"name": "stormwater", "scenarios": [
+        {"key": "moderate_current", "dataset": "7r5q-vr7p", "title": "a moderate storm (2.13 in/hr) with today's sea levels",
+         "features": [{"category": 1, "geometry": square(*CORNER, 10)},
+                      {"category": 2, "geometry": square(*north_of_corner, 10)}]},
+        {"key": "extreme_2080", "dataset": "w8eg-8ha6", "title": "an extreme storm (3.66 in/hr) with 2080 sea level rise",
+         "features": [{"category": 3, "geometry": square(CORNER[0] + 500 / 110_574, CORNER[1], 10)}]},
+    ]}))
     return Store.load(tmp_path)
 
 
@@ -391,3 +408,76 @@ def test_long_gaps_mean_separate_sheds():
     from city_investigator.sheds import days_between
 
     assert [days_between(a, b) for a, b in chain.short_gaps] == [44]  # across the March clock change
+
+
+def test_flood_model_reports_each_category_by_distance(store):
+    result = store.near(*CORNER, 150, topic="flooding")
+    model = [hit for hit in result.hits if hit.evidence.kind == "model"]
+    assert [hit.evidence.id for hit in model] == ["stormwater:moderate_current"]  # the 2080 layer is 500 m away
+    summary = model[0].evidence.summary
+    assert "nuisance flooding (4 in to 1 ft deep) at this spot" in summary
+    assert "deep and contiguous flooding (1 ft or deeper) 50 m away" in summary
+    assert model[0].distance_m == pytest.approx(0, abs=1)
+    assert result.hits[0].evidence.kind == "model"  # undated models are listed first
+    assert by_source(result)["City stormwater flood maps"].state == FOUND
+    far = store.near(40.6600, -74.0200, 150, topic="flooding")
+    assert by_source(far)["City stormwater flood maps"].state == NOTHING_FOUND
+
+
+class FakeDownload:
+    def __init__(self, status, content=b""):
+        self.ok, self.status_code, self.content = status == 200, status, content
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def iter_content(self, size):
+        yield self.content
+
+
+def test_flood_map_download_is_clipped_and_reprojected(tmp_path, monkeypatch):
+    import numpy as np
+    import pyogrio
+    import shapely
+    import shapely.geometry
+    from pyproj import Transformer
+
+    to_feet = Transformer.from_crs("EPSG:4326", "EPSG:2263", always_xy=True)
+
+    def feet(geojson):
+        xs, ys = to_feet.transform(*zip(*geojson["coordinates"][0]))
+        return shapely.to_wkb(shapely.MultiPolygon([shapely.Polygon(zip(xs, ys))]))
+
+    # A citywide layer in State Plane feet, like the city's: one area here, one in Queens.
+    gdb = tmp_path / "unzipped" / "NYC Stormwater Flood Map.gdb"
+    gdb.parent.mkdir()
+    pyogrio.raw.write(
+        gdb, geometry=np.array([feet(square(*CORNER, 10)), feet(square(40.75, -73.85, 10))], dtype=object),
+        field_data=[np.array([2, 1], dtype="int32")], fields=["Flooding_Category"],
+        geometry_type="MultiPolygon", crs="EPSG:2263", driver="OpenFileGDB", layer="flooding",
+    )
+    archive = tmp_path / "layer.zip"
+    with zipfile.ZipFile(archive, "w") as out:
+        for path in gdb.iterdir():
+            out.write(path, f"{gdb.name}/{path.name}")
+
+    class Session:
+        urls = []
+
+        def get(self, url, timeout=None, stream=False):
+            self.urls.append(url)
+            return FakeDownload(200, archive.read_bytes()) if url.endswith("application%2Fzip") else FakeDownload(404)
+
+    monkeypatch.setattr(snapshot, "STORMWATER_SCENARIOS", [{"key": "test", "dataset": "abcd-1234", "title": "a test storm"}])
+    folder = tmp_path / "snapshots"
+    payload = snapshot.fetch_stormwater(folder, Session())
+    [feature] = payload["scenarios"][0]["features"]  # Queens was clipped away
+    assert feature["category"] == 2
+    center = shapely.geometry.shape(feature["geometry"]).centroid
+    assert center.y == pytest.approx(CORNER[0], abs=1e-5) and center.x == pytest.approx(CORNER[1], abs=1e-5)
+    assert len(Session.urls) == 2 and (folder / "raw" / "stormwater_test.zip").is_file()
+    snapshot.fetch_stormwater(folder, Session())
+    assert len(Session.urls) == 2  # the zip is reused

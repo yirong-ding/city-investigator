@@ -181,7 +181,7 @@ def _permit(
         category=category,
         source=source,
         dataset=dataset,
-        summary=f"DOB permit: {work_type}, {status.lower()}, valid {day(issued)} to {day(expires)}",
+        summary=f"DOB permit: {work_type}, valid {day(issued)} to {day(expires)} (status now: {status.lower()})",
         lat=lat,
         lon=lon,
         located_by="building",

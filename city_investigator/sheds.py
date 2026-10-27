@@ -13,8 +13,14 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
-from city_investigator.config import PERMIT_GAP_BRIDGE_DAYS
+from city_investigator.config import PERMIT_GAP_BRIDGE_DAYS, SEPARATE_SHED_DAYS
+from city_investigator import times
 from city_investigator.evidence import Evidence, day
+
+
+def days_between(start: datetime, end: datetime) -> int:
+    """Calendar days in New York, so a daylight-saving change does not shave off a day."""
+    return (times.to_local(end).date() - times.to_local(start).date()).days
 
 
 @dataclass
@@ -43,6 +49,21 @@ class ShedChain:
     def days_up(self, at: datetime) -> int:
         return max(0, (min(at, self.expires) - self.up_since).days)
 
+    @property
+    def short_gaps(self) -> list[tuple[datetime, datetime]]:
+        """Gaps in one shed's paperwork: longer than the bridge, shorter than a separate shed."""
+        return [(a, b) for a, b in self.gaps if days_between(a, b) <= SEPARATE_SHED_DAYS]
+
+    @property
+    def earlier_sheds(self) -> list[tuple[datetime, datetime]]:
+        """Earlier sheds at the same building, separated from the next by a long gap."""
+        sheds, start = [], self.runs[0][0]
+        for (_, end), (gap_start, gap_end) in zip(self.runs, self.gaps):
+            if days_between(gap_start, gap_end) > SEPARATE_SHED_DAYS:
+                sheds.append((start, end))
+                start = gap_end
+        return sheds
+
     def permits_in_current_run(self) -> list[Evidence]:
         return [permit for permit in self.permits if permit.start and permit.start >= self.up_since]
 
@@ -60,7 +81,8 @@ class ShedChain:
             "days_up": self.days_up(at),
             "permits_in_current_run": len(current),
             "renewals": max(0, len(current) - 1),
-            "gaps_over_bridge": [{"from": day(a), "to": day(b), "days": (b - a).days} for a, b in self.gaps],
+            "gaps_over_bridge": [{"from": day(a), "to": day(b), "days": days_between(a, b)} for a, b in self.short_gaps],
+            "earlier_sheds": [{"from": day(a), "to": day(b)} for a, b in self.earlier_sheds],
             "evidence_ids": [permit.id for permit in self.permits],
         }
 

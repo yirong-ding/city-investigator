@@ -160,6 +160,8 @@ def test_whole_investigation_runs_offline(store, tmp_path, monkeypatch):  # noqa
     result = inv.asyncio.run(inv.investigate(args))
     assert result["topic"] == "sidewalk"
     assert result["flags"][0]["type"] == "permit_matches_structure"
+    assert "consistent with" in result["flags"][0]["message"]
+    assert any(item["category"] == "lot" and item["bbl"] == "3004560012" for item in result["records"])
     assert result["shed_chains"][0]["up_since"] == "2025-09-01"
     run_dir = next((tmp_path / "out").iterdir())
     assert {path.name for path in run_dir.iterdir()} == {"photo.jpg", "overlay.png", "result.json"}

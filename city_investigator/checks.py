@@ -12,7 +12,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 
 from city_investigator.evidence import Evidence, day
-from city_investigator.sheds import ShedChain
+from city_investigator.sheds import ShedChain, days_between
 
 AGREEMENT, CONFLICT, GAP = "agreement", "conflict", "gap"
 STRUCTURE_SEEN = {"seen_scaffolding", "seen_construction_fence", "seen_construction_barrier"}
@@ -54,7 +54,8 @@ def sidewalk_checks(
     if seen and sheds:
         flags.append(Flag(
             "permit_matches_structure", AGREEMENT,
-            f"The structure in the photo matches shed or scaffold permits valid{when} at {addresses(sheds)}.",
+            f"The scaffolding in the photo is consistent with shed or scaffold permits valid{when} at "
+            f"{addresses(sheds)}. The photo alone does not show which building's permit covers it.",
             ids(seen) + ids(sheds),
         ))
     elif seen:
@@ -73,8 +74,8 @@ def sidewalk_checks(
             ids(sheds),
         ))
     for chain in chains:
-        if chain.gaps:
-            gaps = "; ".join(f"{day(a)} to {day(b)} ({(b - a).days} days)" for a, b in chain.gaps)
+        if chain.short_gaps:
+            gaps = "; ".join(f"{day(a)} to {day(b)} ({days_between(a, b)} days)" for a, b in chain.short_gaps)
             flags.append(Flag(
                 "permit_chain_gap", GAP,
                 f"The shed permits at {chain.address} have gaps longer than 30 days: {gaps}.",

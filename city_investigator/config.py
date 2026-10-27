@@ -79,3 +79,5 @@ RAIN_START_YEAR = 2020
 
 # Shed permits renew every 90 days; gaps up to this long are paperwork delay, not removal.
 PERMIT_GAP_BRIDGE_DAYS = 30
+# A gap longer than this means the shed came down and a different one went up later.
+SEPARATE_SHED_DAYS = 180

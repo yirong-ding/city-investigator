@@ -378,3 +378,15 @@ def test_photo_counts_only_inside_a_permit_run(store):
     assert not during_permits({"captured_at": "2025-08-01T12:00:00+00:00"}, chain)  # the 49-day gap
     assert during_permits({"captured_at": "2026-05-01T12:00:00+00:00"}, chain)  # current run
     assert not during_permits({"captured_at": None}, chain)
+
+
+def test_long_gaps_mean_separate_sheds():
+    from city_investigator.evidence import from_dob_now
+
+    rows = [permit("2016-01-01", "2018-08-21", bin_="3000009"), permit("2025-02-14", "2026-02-14", bin_="3000009"),
+            permit("2026-03-30", "2026-06-30", bin_="3000009")]
+    chain = build_chains([from_dob_now(row, "test") for row in rows])[0]
+    assert [(a.year, b.year) for a, b in chain.earlier_sheds] == [(2016, 2018)]
+    from city_investigator.sheds import days_between
+
+    assert [days_between(a, b) for a, b in chain.short_gaps] == [44]  # across the March clock change

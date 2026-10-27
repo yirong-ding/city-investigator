@@ -193,7 +193,10 @@ def gather_sidewalk(
     at_photo = store.near(lat, lon, radius, when - timedelta(days=7), when + timedelta(days=7), "sidewalk")
     around = store.near(lat, lon, radius, when - timedelta(days=90), when + timedelta(days=30), "sidewalk")
     permits = [hit for hit in at_photo.hits if hit.evidence.category.endswith("_permit")]
-    lots = [hit for hit in at_photo.hits if hit.evidence.category == "lot"]
+    permit_bbls = {hit.evidence.bbl for hit in permits if hit.evidence.bbl}
+    lots = [Hit(store.lot_by_bbl[bbl], None) for bbl in sorted(permit_bbls) if bbl in store.lot_by_bbl]
+    if not lots:  # no permits: fall back to the lot nearest the photo
+        lots = [hit for hit in at_photo.hits if hit.evidence.category == "lot"]
     complaints = [hit for hit in around.hits if hit.evidence.id.startswith("311:")]
     coverage = [c for c in around.coverage if c.source.startswith("311")] + [
         c for c in at_photo.coverage if "permit" in c.source
@@ -282,11 +285,15 @@ def print_report(result: dict[str, Any]) -> None:
         when = (item["start"] or {}).get("local", "undated")[:10]
         distance = f"{item['distance_m']} m" if item["distance_m"] is not None else ""
         print(f"  {when:10}  {distance:>6}  {item['category']}: {item['summary']}  [{item['id']}]")
+    if result.get("shed_chains"):
+        print("\nShed history (by building)")
     for chain in result.get("shed_chains", []):
+        earlier = ", ".join(f"{e['from'][:4]} to {e['to'][:4]}" for e in chain["earlier_sheds"])
         print(
-            f"\nShed history at {chain['address']}: permitted since {chain['up_since']}, valid until "
-            f"{chain['permit_valid_until']}, {chain['permits_in_current_run']} permit(s) in the current run, "
-            f"{len(chain['gaps_over_bridge'])} gap(s) over 30 days"
+            f"  {chain['address']}: permitted without a break since {chain['up_since']}, valid until "
+            f"{chain['permit_valid_until']}, {chain['permits_in_current_run']} permit(s)"
+            + (f"; {len(chain['gaps_over_bridge'])} paperwork gap(s) of 1 to 6 months" if chain["gaps_over_bridge"] else "")
+            + (f"; earlier sheds: {earlier}" if earlier else "")
         )
     if "recurrence" in result:
         rec = result["recurrence"]

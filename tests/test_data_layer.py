@@ -333,3 +333,38 @@ def test_best_photos_prefers_close_facing_photos_during_permits():
         site,
     )
     assert [p["id"] for p in chosen] == ["near-during", "far-during", "before"]
+
+
+class FakeBinaryResponse(FakeResponse):
+    def __init__(self, body=None, content=b""):
+        super().__init__(body)
+        self.content = content
+
+
+def test_photo_check_downloads_image_and_metadata(tmp_path, monkeypatch):
+    from city_investigator import photo_check
+
+    monkeypatch.setattr(photo_check, "OUTPUT", tmp_path)
+
+    class Session:
+        def get(self, url, params=None, timeout=None):
+            if "graph.mapillary.com" in url:
+                return FakeBinaryResponse({"id": "42", "thumb_2048_url": "https://images.test/42.jpg"})
+            return FakeBinaryResponse(content=b"jpeg-bytes")
+
+    path, meta = photo_check.fetch_image("42", "token", Session())
+    assert path == tmp_path / "42.jpg" and path.read_bytes() == b"jpeg-bytes"
+    assert meta["thumb_2048_url"].endswith("42.jpg")
+
+
+def test_photo_check_reports_missing_image(tmp_path, monkeypatch):
+    from city_investigator import photo_check
+
+    monkeypatch.setattr(photo_check, "OUTPUT", tmp_path)
+
+    class Session:
+        def get(self, url, params=None, timeout=None):
+            return FakeBinaryResponse({"error": {"message": "not found"}})
+
+    with pytest.raises(RuntimeError, match="no image for 7"):
+        photo_check.fetch_image("7", "token", Session())

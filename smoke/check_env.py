@@ -30,6 +30,24 @@ HOSTS = {
 }
 
 
+def check_mapillary() -> str:
+    """Try the token on a tiny Gowanus search; a Client Secret is rejected."""
+    token = os.environ.get("MAPILLARY_TOKEN")
+    if not token:
+        return "no token set"
+    try:
+        response = requests.get(
+            "https://graph.mapillary.com/images",
+            params={"access_token": token, "fields": "id", "bbox": "-73.99,40.67,-73.98,40.68", "limit": 1},
+            timeout=20,
+        )
+    except requests.RequestException as error:
+        return f"unreachable ({type(error).__name__})"
+    if response.ok:
+        return "token works"
+    return f"token rejected (HTTP {response.status_code}): copy the Client Token, not the Client Secret"
+
+
 def main() -> None:
     load_env()
     print("Keys")
@@ -43,6 +61,7 @@ def main() -> None:
         except requests.RequestException as error:
             status = f"unreachable ({type(error).__name__})"
         print(f"  {label:28} {status}")
+    print(f"\nMapillary token: {check_mapillary()}")
 
 
 if __name__ == "__main__":

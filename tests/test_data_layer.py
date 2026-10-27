@@ -524,3 +524,28 @@ def test_flood_map_download_reports_what_came_back(tmp_path, capsys):
         snapshot.download_zip("9i7c-xyvv", tmp_path / "maps.zip", Session())
     assert "text/html, starts b'<!DOCTYPE html>" in capsys.readouterr().out
     assert not list(tmp_path.iterdir())  # no partial file left behind
+
+
+def test_flood_map_finder_lists_sources_and_publishers(capsys):
+    from city_investigator import find_flood_maps
+
+    class Session:
+        def get(self, url, params=None, timeout=None):
+            if "/api/views/" in url:
+                return FakeDownload(200, body={"name": "NYC Stormwater Flood Map", "viewType": "blobby", "blobFilename": "map.zip"})
+            if url.endswith("/search"):
+                return FakeDownload(200, body={"results": [
+                    {"title": "Moderate Stormwater Flooding", "orgId": "org1", "owner": "nyc_gis", "numViews": 9, "url": "https://x/FeatureServer"},
+                    {"title": "Bike lanes", "orgId": "org2"},
+                ]})
+            if "/portals/" in url:
+                return FakeDownload(200, body={"name": "City Agency" if url.endswith("org1") else "Someone"})
+            return FakeDownload(200, body={"services": [{"name": "Moderate_Current_Sea_Levels", "type": "FeatureServer"}]})
+
+    find_flood_maps.open_data(Session())
+    find_flood_maps.arcgis(Session())
+    out = capsys.readouterr().out
+    assert "7r5q-vr7p (moderate storm, current sea levels): 'NYC Stormwater Flood Map'; type blobby" in out
+    assert "Moderate Stormwater Flooding | City Agency (nyc_gis) | views 9 | https://x/FeatureServer" in out
+    assert "Bike lanes" not in out
+    assert "Layers hosted by Someone" in out and "Moderate_Current_Sea_Levels (FeatureServer)" in out

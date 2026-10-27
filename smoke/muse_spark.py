@@ -138,7 +138,7 @@ def validate_claims(text: str, known_ids: set[str]) -> list[str]:
         return [f"not JSON: {error}; answer starts {str(text)[:80]!r}"]
     claims = data.get("claims") if isinstance(data, dict) else None
     if not isinstance(claims, list) or not claims:
-        return ["missing or empty 'claims' list"]
+        return [f"missing or empty 'claims' list; answer starts {str(text)[:80]!r}"]
     problems = []
     for index, claim in enumerate(claims):
         if set(claim) != {"text", "kind", "evidence_ids"}:
@@ -250,6 +250,8 @@ class Runner:
         for _ in range(max_turns):
             choice = self.call(messages, tools=TOOLS, tool_choice="auto").choices[0]
             if choice.finish_reason != "tool_calls":
+                # Keep the plain-text answer: converting it is easier than starting over.
+                messages.append({"role": "assistant", "content": choice.message.content or ""})
                 break
             messages.append(choice.message.model_dump(exclude_none=True))
             for call in choice.message.tool_calls:
@@ -258,7 +260,13 @@ class Runner:
                     {"role": "tool", "tool_call_id": call.id, "content": json.dumps(FIXTURE_RESULT)}
                 )
         messages.append(
-            {"role": "user", "content": "Now give your answer as labeled claims in the required format."}
+            {
+                "role": "user",
+                "content": (
+                    "Rewrite your answer above as labeled claims in the required format, "
+                    "one claim per fact or inference, citing only the ids you were given."
+                ),
+            }
         )
         content = self.call(messages, response_format=CLAIMS_FORMAT).choices[0].message.content
         problems = validate_claims(content, {"photo", FIXTURE_RECORD_ID})
@@ -275,6 +283,12 @@ def main() -> None:
         choices=sorted(PROVIDERS),
         default="meta",
         help="meta: Meta Model API; open: Muse Spark Open on Baseten",
+    )
+    parser.add_argument(
+        "--only",
+        action="append",
+        metavar="STEP",
+        help="run only this step number, for example --only 6; repeatable",
     )
     args = parser.parse_args()
     load_env()
@@ -297,6 +311,8 @@ def main() -> None:
         "photo_size": size,
         "steps": {},
     }
+    if args.only:
+        steps = {name: step for name, step in steps.items() if name.split()[0] in args.only}
     for name, step in steps.items():
         started = time.monotonic()
         try:

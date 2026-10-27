@@ -84,11 +84,14 @@ PERMIT_GAP_BRIDGE_DAYS = 30
 # A gap longer than this means the shed came down and a different one went up later.
 SEPARATE_SHED_DAYS = 180
 
-# NYC Stormwater Flood Maps: modeled rain-driven flooding in design storms, citywide.
+# NYC Stormwater Flood Maps: modeled rain-driven flooding in design storms, citywide. The city
+# publishes all scenarios as one collection; each is found in the download by words in its name.
+STORMWATER_DATASET = "9i7c-xyvv"
 STORMWATER_SCENARIOS = [
-    {"key": "moderate_current", "dataset": "7r5q-vr7p", "title": "a moderate storm (2.13 in/hr) with today's sea levels"},
-    {"key": "moderate_2050", "dataset": "5rzh-cyqd", "title": "a moderate storm (2.13 in/hr) with 2050 sea level rise"},
-    {"key": "extreme_2080", "dataset": "w8eg-8ha6", "title": "an extreme storm (3.66 in/hr) with 2080 sea level rise"},
+    {"key": "limited_current", "match": ("limited", "current"), "title": "a limited storm (1.77 in/hr) with today's sea levels"},
+    {"key": "moderate_current", "match": ("moderate", "current"), "title": "a moderate storm (2.13 in/hr) with today's sea levels"},
+    {"key": "moderate_2050", "match": ("moderate", "2050"), "title": "a moderate storm (2.13 in/hr) with 2050 sea level rise"},
+    {"key": "extreme_2080", "match": ("extreme", "2080"), "title": "an extreme storm (3.66 in/hr) with 2080 sea level rise"},
 ]
 STORMWATER_CATEGORIES = {
     1: "nuisance flooding (4 in to 1 ft deep)",

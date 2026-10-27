@@ -31,9 +31,9 @@ Conflicts between sources and gaps in the records are flagged, not smoothed over
 
 ## Data
 
-NYC Open Data (311 service requests, PLUTO property data, Department of Buildings permits), FloodNet street flooding sensors (New York University and The City University of New York), hourly rain at the Central Park weather station, and the [NYC Stormwater Flood Maps](https://data.cityofnewyork.us/d/7r5q-vr7p). Sources are credited in the app.
+NYC Open Data (311 service requests, PLUTO property data, Department of Buildings permits), FloodNet street flooding sensors (New York University and The City University of New York), hourly rain at the Central Park weather station, and the [NYC Stormwater Flood Maps](https://data.cityofnewyork.us/d/9i7c-xyvv). Sources are credited in the app.
 
-The flood maps are the **model** evidence: where the city's models expect rain to pond (4 in or deeper, over at least a quarter acre) in a moderate storm today, a moderate storm with 2050 sea levels, and an extreme storm with 2080 sea levels. Checks compare them with what was recorded: flooding the model also expects, or flooding the model does not map.
+The flood maps are the **model** evidence: where the city's models expect rain to pond (4 in or deeper, over at least a quarter acre) in a limited and a moderate storm today, a moderate storm with 2050 sea levels, and an extreme storm with 2080 sea levels. Checks compare them with what was recorded: flooding the model also expects, or flooding the model does not map.
 
 City Investigator is a research aid, **not an official determination**. For life-threatening flooding call 911; to report a problem use 311.
 
@@ -96,7 +96,7 @@ python -m city_investigator.shortlist --photos  # candidate demo sites, with Map
 python -m city_investigator.lookup --lat 40.6787 --lon -73.9830 --start 2026-08-22 --end 2026-08-26 --topic flooding
 ```
 
-- **Snapshot** saves 311 complaints (2020 on, plus flooding from the 2010s), DOB shed, scaffold and fence permits, FloodNet sensors and flood events, PLUTO property data, hourly rain at the Central Park weather station, and the three stormwater flood map scenarios (clipped to the neighborhood) to `data/snapshots/`, each with its query and download time. Owner names are dropped. Run `--only NAME` to refresh one dataset, for example `--only stormwater`.
+- **Snapshot** saves 311 complaints (2020 on, plus flooding from the 2010s), DOB shed, scaffold and fence permits, FloodNet sensors and flood events, PLUTO property data, hourly rain at the Central Park weather station, and the stormwater flood map scenarios (clipped to the neighborhood) to `data/snapshots/`, each with its query and download time. Owner names are dropped. Run `--only NAME` to refresh one dataset, for example `--only stormwater`.
 - **Lookup** returns the records near a point and time window (or for one building) and, for every source, a coverage note that separates "searched and found nothing" from "no data could exist here", such as a flood sensor installed after the storm in question.
 - **Shortlist** ranks the longest-standing sheds (chaining 90-day permits and bridging gaps up to 30 days) and the most-flooded sensor corners, with Street View links for scouting by eye and nearby Mapillary photos the app can use with credit.
 

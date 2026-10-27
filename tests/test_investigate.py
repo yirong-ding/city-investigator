@@ -185,3 +185,17 @@ def test_complaint_lag_separates_street_and_indoor():
     flag = next(f for f in flood_checks([], [event, indoor, street], 1.0, "found", when, when) if f.type == "complaints_lag_sensor")
     assert "first street complaint came about 14 hours" in flag.message
     assert "indoor sewer backup was reported about 3 hours" in flag.message
+
+
+def test_only_permits_valid_on_the_photo_day_reach_the_checks(store):  # noqa: F811
+    # The made-up permit chain runs to 2025-03-31, then from 2025-04-15: a week around 2025-04-05
+    # still includes the first permit, but none is valid on the day itself.
+    when = inv.parse_local("2025-04-05")
+    hits, _, _, valid = inv.gather_sidewalk(store, *SHED, 50, when)
+    assert any(hit.evidence.category == "shed_permit" for hit in hits)
+    assert valid == []
+    assert [f.type for f in sidewalk_checks([evidence("photo:scaffolding", "seen_scaffolding")], valid, [], when)] == [
+        "structure_without_permit"
+    ]
+    _, _, _, valid = inv.gather_sidewalk(store, *SHED, 50, inv.parse_local("2025-03-31"))
+    assert len(valid) == 1  # the last day of a permit still counts

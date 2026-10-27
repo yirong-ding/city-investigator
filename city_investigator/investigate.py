@@ -36,7 +36,7 @@ from city_investigator.segment import blur_regions, draw_overlay, segment, summa
 from city_investigator.settings import ROOT, load_env
 from city_investigator.sheds import ShedChain, build_chains
 from city_investigator.shortlist import street_view
-from city_investigator.store import Coverage, Hit, LookupResult, Store
+from city_investigator.store import Coverage, Hit, LookupResult, Store, overlaps
 
 OUTPUT = ROOT / "data" / "private" / "investigations"
 CONCEPTS = {
@@ -204,7 +204,14 @@ def gather_sidewalk(
     ]
     bins = {hit.evidence.bin for hit in permits if hit.evidence.bin}
     chains = build_chains(item for item in store.evidence if item.bin in bins)
-    return lots + permits + complaints, coverage, chains, [hit.evidence for hit in permits]
+    # Records show permits from the week around the photo; checks use only those valid on its day.
+    photo_day = times.to_local(when).date()
+    valid = [
+        hit.evidence
+        for hit in permits
+        if overlaps(hit.evidence, times.local_day_start(photo_day), times.local_day_end(photo_day))
+    ]
+    return lots + permits + complaints, coverage, chains, valid
 
 
 def recurrence(store: Store, history: LookupResult, lat: float, lon: float, radius: float) -> dict[str, Any]:

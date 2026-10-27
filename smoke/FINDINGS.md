@@ -195,3 +195,9 @@ Second run, 230 Court St (photo 1332532847863656), hosted Muse Spark 1.3: 10 of 
 - It did the date arithmetic right: 5 permits in the search window, 4 valid on the photo date (224 Court St's permit had ended 3 days earlier).
 - **It made no tool calls in either run.** Muse Spark only summarized evidence handed to it. Changed: Muse Spark now has `check_photo` (SAM 3.1 as a tool) to verify what it thinks it sees before claiming it, and is told to read complaint resolutions and permits with `get_record`. The report lists every check.
 - The sources list now shows each record's address and distance, so a claim such as "permits at 239 Court Street" can be checked. Muse Spark no longer describes people in the photo.
+
+Third and fourth runs, with the tools (hosted Muse Spark 1.3, about 41 to 45 s and $0.07 each):
+
+- **230 Court St:** Muse Spark checked the photo with SAM 3.1 ("sidewalk shed": not found), then read the complaint and both permits. The Jan 29, 2025 complaint ("Inadequate Defective/None") was closed the next day with no further action; two months later the photo shows no shed while the permit was valid.
+- **214 Court St:** it read the "218 Court Street" sign, confirmed the scaffolding with SAM 3.1 (0.55), and read the resolution of four outdoor dining "Sidewalk Zone Blocked" complaints at 208 Court St in April 2025.
+- **Bug in the rules, repeated by the model:** the agreement flag listed 224 Court St as "valid on 2025-03-30", but that permit ended 2025-03-27. Records came from a week around the photo and the flag treated all of them as valid on the day. Fixed: checks get only permits valid on the photo's day. Muse Spark is also told not to re-check what SAM 3.1 already looked for (it checked "sidewalk shed scaffolding" after "scaffolding").

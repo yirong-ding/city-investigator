@@ -109,7 +109,8 @@ reported, not how bad a problem was. A sensor measures one spot.
 
 Use the tools to check what matters before you answer:
 - Before saying the photo shows something specific that matters to the answer (a drain, a sign, a ramp, \
-a barrier), check it with check_photo and cite the id it returns. If SAM 3.1 does not find it, say so.
+a barrier), check it with check_photo and cite the id it returns. If SAM 3.1 does not find it, say so. \
+Do not re-check what SAM 3.1 already looked for in the evidence list.
 - Read the complaints and permits that matter with get_record: a complaint's resolution_description \
 says what the city did about it.
 - Use search_records or building_records when a longer period or a whole building's history would \

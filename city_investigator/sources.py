@@ -38,14 +38,28 @@ FISP_STATUS = {
 
 
 @dataclass(frozen=True)
+class District:
+    """What the snapshot knows about the district when it selects rows."""
+
+    box: Box  # around its tax lots
+    lots: frozenset[str] = frozenset()  # their BBLs
+    streets: tuple[str, ...] = ()  # street names in their addresses, as PLUTO writes them
+
+
+def keep_all(row: dict[str, Any], district: District) -> bool:
+    return True
+
+
+@dataclass(frozen=True)
 class Source:
     name: str  # snapshot file name
     dataset: str
     topic: str
     label: str  # for coverage notes
     caveat: str  # what the records cannot show
-    where: Callable[[Box], list[str]]
+    where: Callable[[District], list[str]]  # SoQL where clauses, tried in order
     to_evidence: Callable[[dict[str, Any], str, LotFinder], Evidence | None]
+    keep: Callable[[dict[str, Any], District], bool] = keep_all  # for rows a where clause cannot narrow
 
 
 # Selecting rows
@@ -56,22 +70,53 @@ def polygon(box: Box) -> str:
     return f"POLYGON(({west} {south}, {east} {south}, {east} {north}, {west} {north}, {west} {south}))"
 
 
-def inside(columns: tuple[str, ...], extra: str = "") -> Callable[[Box], list[str]]:
-    """Where clauses that keep rows whose geometry, in any of the columns, falls in the box."""
-    def where(box: Box) -> list[str]:
-        clauses = [f"intersects({column}, '{polygon(box)}')" for column in columns]
-        return [f"{clause} AND {extra}" if extra else clause for clause in clauses]
+def with_extra(clauses: list[str], extra: str) -> list[str]:
+    return [f"{clause} AND {extra}" if extra else clause for clause in clauses]
+
+
+def inside(columns: tuple[str, ...], extra: str = "") -> Callable[[District], list[str]]:
+    """Rows whose geometry, in any of the columns, falls in the district's box."""
+    return lambda district: with_extra([f"intersects({column}, '{polygon(district.box)}')" for column in columns], extra)
+
+
+def in_district(column: str, extra: str = "") -> Callable[[District], list[str]]:
+    """A community district column, in the forms the city uses."""
+    forms = [f"{column} = '306'", f"{column} = 306", f"{column} = '306 BROOKLYN'", f"{column} = '06 BROOKLYN'"]
+    return lambda district: with_extra(forms, extra)
+
+
+def board_or_borough(column: str, bbl_column: str, extra: str = "") -> Callable[[District], list[str]]:
+    """The district's forms first; then district 6 of every borough, and last all of Brooklyn,
+    both narrowed to the district's tax lots by the source's keep."""
+    wider = [
+        f"{column} = '6'", f"{column} = 6", f"{column} = 'BK06'", f"{column} = '06'",
+        f"starts_with({bbl_column}, '3')", f"{bbl_column} >= 3000000000 AND {bbl_column} < 4000000000",
+    ]
+    return lambda district: [*in_district(column, extra)(district), *with_extra(wider, extra)]
+
+
+def on_streets(column: str, extra: str) -> Callable[[District], list[str]]:
+    """For geometry stored as text: the district's street names first, then everything matching extra."""
+    def where(district: District) -> list[str]:
+        if not district.streets:
+            return [extra]
+        names = ", ".join("'" + street.replace("'", "''") + "'" for street in district.streets)
+        return [f"{column} IN ({names}) AND {extra}", extra]
 
     return where
 
 
-def in_district(column: str, extra: str = "") -> Callable[[Box], list[str]]:
-    """Where clauses for a community district column, in the forms the city uses."""
-    def where(_: Box) -> list[str]:
-        clauses = [f"{column} = '306'", f"{column} = 306", f"{column} = '306 BROOKLYN'", f"{column} = '06 BROOKLYN'"]
-        return [f"{clause} AND {extra}" if extra else clause for clause in clauses]
+def on_lots(read_bbl: Callable[[dict[str, Any]], str | None]) -> Callable[[dict[str, Any], District], bool]:
+    return lambda row, district: not district.lots or read_bbl(row) in district.lots
 
-    return where
+
+def in_box(*columns: str) -> Callable[[dict[str, Any], District], bool]:
+    def keep(row: dict[str, Any], district: District) -> bool:
+        lat, lon = center(row, *columns)
+        south, west, north, east = district.box
+        return lat is not None and lon is not None and south <= lat <= north and west <= lon <= east
+
+    return keep
 
 
 # Reading rows
@@ -436,13 +481,15 @@ SOURCES: dict[str, Source] = {
                inside(("geometry", "location"), f"createddate >= '{SINCE}'"), tree_work_order),
         Source("facade_filings", "xubg-57si", FACADES, "Façade inspection filings (Local Law 11)",
                "Only buildings taller than six stories must file, every five years; a lower building has no filings, which says nothing about its safety.",
-               lambda _: ["upper(borough) = 'BROOKLYN'", "borough = '3'", "borough = 3"], facade_filing),
+               lambda _: ["upper(borough) = 'BROOKLYN'", "borough = '3'", "borough = 3"], facade_filing,
+               on_lots(lambda row: bbl_from_block_lot(row))),
         Source("sidewalk_violations", "6kbp-uz6m", SIDEWALK_DAMAGE, "DOT sidewalk violations",
                "DOT inspects after complaints or in planned sweeps; a dismissal means the repair was accepted or the violation withdrawn.",
-               in_district("cb"), sidewalk_violation),
+               board_or_borough("cb", "bblid", "vissuedate >= '2015-01-01T00:00:00'"), sidewalk_violation,
+               on_lots(lambda row: bbl_from(row, "bblid"))),
         Source("tree_sidewalk_damage", "j6v2-6uxq", SIDEWALK_DAMAGE, "DOT sidewalk damage from street trees",
                "Damage caused by a street tree is recorded separately from the owner's violations.",
-               in_district("cb"), tree_sidewalk_damage),
+               board_or_borough("cb", "bblid"), tree_sidewalk_damage, on_lots(lambda row: bbl_from(row, "bblid"))),
         Source("ramps", "ufzp-rrqu", CURB_RAMPS, "DOT pedestrian ramp survey",
                "Each ramp was surveyed once (the dataset was last updated in 2021); later repairs may be missing.",
                inside(("the_geom",)), ramp_survey),
@@ -454,16 +501,18 @@ SOURCES: dict[str, Source] = {
                inside(("the_geom",), f"rptdate >= '{SINCE}'"), pothole_order),
         Source("street_permits", "tqtj-sjs8", STREET_CONSTRUCTION, "DOT street construction permits",
                "A permit shows work was allowed in its window, not that it happened; emergency work can start before its permit.",
-               inside(("locationgeometry",), "issuedworkenddate >= '2023-01-01T00:00:00'"), street_permit),
+               # Its geometry is stored as text, so the server cannot select by area.
+               on_streets("onstreetname", "upper(boroughname) = 'BROOKLYN' AND issuedworkenddate >= '2024-01-01T00:00:00'"),
+               street_permit, in_box("locationgeometry", "wkt")),
         Source("street_closures", "i6b5-j7bu", STREET_CONSTRUCTION, "DOT street closures for construction",
                "Planned closures; the work itself can be shorter.",
                inside(("the_geom",), "work_end_date >= '2023-01-01T00:00:00'"), street_closure),
         Source("dining_licenses", "fpeh-f7ci", OUTDOOR_DINING, "Dining Out NYC licenses",
                "Licenses under the program that began in 2024; the earlier Open Restaurants program is in a separate historical dataset.",
-               lambda box: [*in_district("community_board")(box), *inside(("location",))(box)], dining_license),
+               lambda district: [*in_district("community_board")(district), *inside(("location",))(district)], dining_license),
         Source("dining_inspections", "4dx7-axux", OUTDOOR_DINING, "Open Restaurants inspections (2020 to 2024)",
                "Inspections from the earlier program only.",
-               lambda box: [*in_district("communityboard")(box), "communityboard = '6' AND upper(borough) = 'BROOKLYN'"],
+               lambda district: [*in_district("communityboard")(district), "communityboard = '6' AND upper(borough) = 'BROOKLYN'"],
                dining_inspection),
     )
 }

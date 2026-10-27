@@ -21,6 +21,7 @@ import io
 import json
 import re
 import time
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
@@ -48,7 +49,7 @@ from city_investigator.evidence import classify_complaint, norm_bbl
 from city_investigator.geo import to_float
 from city_investigator.settings import SNAPSHOT_DIR, load_env
 from city_investigator.socrata import Socrata, SocrataError
-from city_investigator.sources import SOURCES, bbl_from_block_lot
+from city_investigator.sources import SOURCES, District
 
 IEM_URL = "https://mesonet.agron.iastate.edu/cgi-bin/request/asos.py"
 ARCGIS_PAGE = 1000
@@ -82,10 +83,28 @@ def district_box(done: dict[str, list[dict[str, Any]]], margin_deg: float = 0.00
     return min(lats) - margin_deg, min(lons) - margin_deg, max(lats) + margin_deg, max(lons) + margin_deg
 
 
-def in_district_lots(row: dict[str, Any], done: dict[str, list[dict[str, Any]]]) -> bool:
-    """For borough-wide datasets: keep rows on one of the district's tax lots."""
-    lots = {norm_bbl(lot.get("bbl")) for lot in done.get("pluto", [])}
-    return not lots or bbl_from_block_lot(row) in lots
+_districts: dict[int, tuple[list[dict[str, Any]], District]] = {}  # holding the rows keeps their id unique
+
+
+def street_of(address: Any) -> str | None:
+    """'253 4 AVENUE' -> '4 AVENUE': the street of a PLUTO address."""
+    text = " ".join(str(address or "").upper().split())
+    return re.sub(r"^\S*\d\S*\s+", "", text) or None
+
+
+def district(done: dict[str, list[dict[str, Any]]]) -> District:
+    """The district's box, lots and streets, from its downloaded tax lots (computed once per download)."""
+    pluto = done.get("pluto")
+    if not pluto:
+        return District(district_box(done))
+    if id(pluto) not in _districts:
+        streets = Counter(street for row in pluto if (street := street_of(row.get("address"))))
+        _districts[id(pluto)] = pluto, District(
+            district_box(done),
+            frozenset(bbl for row in pluto if (bbl := norm_bbl(row.get("bbl")))),
+            tuple(sorted(street for street, lots in streets.items() if lots >= 2)),
+        )
+    return _districts[id(pluto)][1]
 
 
 def source_steps() -> list[Step]:
@@ -94,8 +113,8 @@ def source_steps() -> list[Step]:
         Step(
             source.name,
             source.dataset,
-            lambda done, source=source: source.where(district_box(done)),
-            keep=in_district_lots if source.name == "facade_filings" else (lambda row, done: True),
+            lambda done, source=source: source.where(district(done)),
+            keep=lambda row, done, source=source: source.keep(row, district(done)),
         )
         for source in SOURCES.values()
     ]
@@ -171,7 +190,7 @@ def fetch_step(client: Socrata, step: Step, done: dict[str, list[dict[str, Any]]
             rows = client.rows(step.dataset, where)
         except SocrataError as error:
             last_error = error
-            if error.status != 400:  # only a malformed query is worth retrying with a fallback
+            if error.status not in (400, 414):  # only a malformed or too long query is worth a fallback
                 raise
             continue
         kept = [scrub(row) for row in rows if step.keep(row, done)]

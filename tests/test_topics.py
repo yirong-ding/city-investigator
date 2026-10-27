@@ -136,8 +136,59 @@ def test_snapshot_tries_each_way_of_writing_the_district():
     step = next(step for step in snapshot.plan() if step.name == "sidewalk_violations")
     client = District()
     where, rows = snapshot.fetch_step(client, step, {})
-    assert where == "cb = '06 BROOKLYN'" and rows[0]["violationid"] == "V1"
+    assert where == "cb = '06 BROOKLYN' AND vissuedate >= '2015-01-01T00:00:00'" and rows[0]["violationid"] == "V1"
     assert len(client.asked) == 4  # '306' and 306 matched nothing, '306 BROOKLYN' was refused
+
+
+class BoardNumber:
+    """A portal that writes only the board number, so district 6 of every borough matches."""
+
+    def rows(self, dataset, where):
+        if not where.startswith("cb = '6' "):
+            return []
+        return [{"violationid": "V1", "bblid": LOT, "cb": "6"}, {"violationid": "V2", "bblid": "1000010001", "cb": "6"}]
+
+
+def test_a_bare_board_number_is_narrowed_to_the_districts_lots():
+    step = next(step for step in snapshot.plan() if step.name == "sidewalk_violations")
+    done = {"pluto": [{"bbl": "3004560012.00000000", "latitude": str(LAT), "longitude": str(LON)}]}
+    where, rows = snapshot.fetch_step(BoardNumber(), step, done)
+    assert where.startswith("cb = '6' AND") and [row["violationid"] for row in rows] == ["V1"]  # V2 is in Manhattan
+
+
+def test_street_of_drops_the_house_number():
+    assert snapshot.street_of("253 4 AVENUE") == "4 AVENUE"
+    assert snapshot.street_of(" 12-14  court street") == "COURT STREET"
+    assert snapshot.street_of(None) is None
+
+
+class LongStreetList:
+    """A portal that refuses the district's street list as too long, then answers for all of Brooklyn."""
+
+    def __init__(self):
+        self.asked = []
+
+    def rows(self, dataset, where):
+        self.asked.append(where)
+        if "onstreetname IN" in where:
+            raise SocrataError("URI too long", 414)
+        return [
+            {"permitnumber": "P1", "locationgeometry": f"POINT ({LON} {LAT})"},
+            {"permitnumber": "P2", "locationgeometry": "POINT (-73.90 40.60)"},  # elsewhere in Brooklyn
+            {"permitnumber": "P3"},  # no place
+        ]
+
+
+def test_street_permits_ask_by_street_then_keep_the_districts_box():
+    step = next(step for step in snapshot.plan() if step.name == "street_permits")
+    lots = [("3004560012", "1 COURT STREET"), ("3004560013", "3 COURT STREET"), ("3004560014", "5 UNION STREET")]
+    done = {"pluto": [{"bbl": bbl, "address": address, "latitude": str(LAT), "longitude": str(LON)} for bbl, address in lots]}
+    first = step.wheres(done)[0]
+    assert "onstreetname IN ('COURT STREET')" in first  # a street on one lot only is left out
+    client = LongStreetList()
+    where, rows = snapshot.fetch_step(client, step, done)
+    assert "IN" not in where and "BROOKLYN" in where and [row["permitnumber"] for row in rows] == ["P1"]
+    assert len(client.asked) == 2
 
 
 def test_borough_wide_filings_keep_only_the_districts_lots():

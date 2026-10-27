@@ -76,12 +76,15 @@ class SpendGuard:
         LEDGER.write_text(json.dumps(ledger, indent=2))
 
 
-def muse_cost(usage: Any) -> float:
-    """Estimated cost of one Chat Completions call; reasoning tokens bill as output."""
+def muse_cost(usage: Any, prefix: str = "MUSE") -> float:
+    """Estimated cost of one Chat Completions call; reasoning tokens bill as output.
+
+    Prices come from {prefix}_INPUT_USD_PER_M and {prefix}_OUTPUT_USD_PER_M.
+    """
     if usage is None:
         return 0.0
-    input_price = env_float("MUSE_INPUT_USD_PER_M", 1.25)
-    output_price = env_float("MUSE_OUTPUT_USD_PER_M", 4.25)
+    input_price = env_float(f"{prefix}_INPUT_USD_PER_M", 1.25)
+    output_price = env_float(f"{prefix}_OUTPUT_USD_PER_M", 4.25)
     return (usage.prompt_tokens * input_price + usage.completion_tokens * output_price) / 1e6
 
 
@@ -94,6 +97,17 @@ def meta_client(async_client: bool = False) -> Any:
     base_url = os.environ.get("META_BASE_URL") or "https://api.meta.ai/v1"
     # The OpenAI SDK does not read MODEL_API_KEY on its own, so pass it explicitly.
     return (AsyncOpenAI if async_client else OpenAI)(base_url=base_url, api_key=key)
+
+
+def open_client() -> Any:
+    """Client for the open-weight Muse model on a partner (Baseten by default)."""
+    from openai import OpenAI
+
+    key = os.environ.get("OPEN_MODEL_API_KEY")
+    if not key:
+        raise SystemExit("OPEN_MODEL_API_KEY is not set. Add your Baseten key to .env.")
+    base_url = os.environ.get("OPEN_MODEL_BASE_URL") or "https://inference.baseten.co/v1"
+    return OpenAI(base_url=base_url, api_key=key)
 
 
 def load_photo(path: Path, max_side: int = 1600) -> tuple[bytes, tuple[int, int]]:

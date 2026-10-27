@@ -13,6 +13,7 @@ from smoke._common import load_env
 
 KEYS = {
     "MODEL_API_KEY": "required: Muse Spark and SAM 3.1",
+    "OPEN_MODEL_API_KEY": "optional: Muse Spark Open on Baseten",
     "SOCRATA_APP_TOKEN": "recommended: avoids NYC Open Data throttling",
     "NYC_GEOCLIENT_KEY": "optional: GeoSearch works without a key",
     "MAPILLARY_TOKEN": "optional: street photos",
@@ -20,6 +21,7 @@ KEYS = {
 
 HOSTS = {
     "Meta Model API": "https://api.meta.ai/v1/models",
+    "Baseten inference": "https://inference.baseten.co/v1/models",
     "NYC Open Data": "https://data.cityofnewyork.us/resource/aq7i-eu5q.json?$limit=1",
     "NYC GeoSearch": "https://geosearch.planninglabs.nyc/v2/search?text=Carroll%20St%20Brooklyn",
     "Iowa Environmental Mesonet": "https://mesonet.agron.iastate.edu/",

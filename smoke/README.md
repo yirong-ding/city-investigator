@@ -8,6 +8,7 @@ Small scripts that check every outside service works before the real build start
 | `python -m smoke.nyc_data` | 311 problem types in Brooklyn Community Board 6, flood complaints per year in three districts, DOB NOW work types, FloodNet sensors and events in BK06 | Free |
 | `python -m smoke.rainfall` | Hourly rain for the Aug 22–24, 2026 storm from a weather station (a record) and from Open-Meteo (a model) | Free |
 | `python -m smoke.muse_spark photo.jpg` | Muse Spark with an image; plus tools; plus a strict JSON schema; then all three in one tool loop | 5 to 8 calls, a few cents (estimate) |
+| `python -m smoke.muse_spark photo.jpg --provider open` | The same steps on Muse Spark Open via Baseten, plus a text-only tool loop in case it cannot take images. Decides the open-weights prize | Baseten credits |
 | `python -m smoke.sam photo.jpg` | Hosted SAM 3.1, one request per concept, with confidence scores and a mask overlay | 4 requests, about $0.01 (reported price) |
 | `python -m pytest tests` | Spend cap, evidence-ID check, SAM parsing and overlay, photo rotation, all offline | Free |
 
@@ -32,4 +33,5 @@ Each script prints PASS or FAIL per check and writes details to `smoke/results/`
 
 - **`unreachable (ProxyError)` or HTTP 403 on NYC Open Data:** the network blocks the service, or anonymous requests are throttled. Add `SOCRATA_APP_TOKEN`, or run on another network.
 - **`MODEL_API_KEY is not set`:** copy `.env.example` to `.env` and add the key.
+- **`OPEN_MODEL_API_KEY is not set`:** add your Baseten key to `.env`. The address and model ID are already filled in.
 - **A Muse Spark step fails with HTTP 400:** that step's feature combination is not supported as sent. The error text says which; the later build works around it.

@@ -103,3 +103,24 @@ def test_load_photo_applies_rotation_and_strips_metadata(tmp_path):
     jpeg, size = load_photo(path)
     assert size == (300, 400)
     assert not Image.open(io.BytesIO(jpeg)).getexif()
+
+
+def test_open_client_requires_baseten_key(monkeypatch):
+    monkeypatch.delenv("OPEN_MODEL_API_KEY", raising=False)
+    with pytest.raises(SystemExit, match="OPEN_MODEL_API_KEY"):
+        _common.open_client()
+
+
+def test_open_client_defaults_to_baseten(monkeypatch):
+    monkeypatch.setenv("OPEN_MODEL_API_KEY", "test-key")
+    monkeypatch.delenv("OPEN_MODEL_BASE_URL", raising=False)
+    assert str(_common.open_client().base_url).startswith("https://inference.baseten.co/v1")
+
+
+def test_cost_uses_provider_prices(monkeypatch):
+    class Usage:
+        prompt_tokens = 1_000_000
+        completion_tokens = 0
+
+    monkeypatch.setenv("OPEN_MODEL_INPUT_USD_PER_M", "0.5")
+    assert _common.muse_cost(Usage(), "OPEN_MODEL") == 0.5

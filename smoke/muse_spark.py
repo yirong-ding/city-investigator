@@ -1,17 +1,21 @@
 """Day 1 smoke test: can Muse Spark take an image, tools and a strict JSON schema together?
 
-Four requests on one photo, each adding one feature, so a failure points at the
-feature that broke:
+Requests that each add one feature, so a failure points at the feature that broke:
 
+  0. text only
   1. image
   2. image + tools
   3. image + strict JSON schema
   4. image + tools + strict JSON schema (one tool loop, then a schema-valid answer)
+  5. text + tools + strict JSON schema (the fallback if a model cannot take images)
 
-Step 4 feeds back a fixed tool result that is labeled as a fixture, so it tests the
-API mechanics, not real data. It also checks that every cited evidence ID exists.
+Steps 4 and 5 feed back a fixed tool result that is labeled as a fixture, so they
+test the API mechanics, not real data. They also check that every cited evidence ID
+exists.
 
-Usage: python -m smoke.muse_spark path/to/street-photo.jpg
+Usage:
+  python -m smoke.muse_spark path/to/street-photo.jpg                  # Meta Model API
+  python -m smoke.muse_spark path/to/street-photo.jpg --provider open  # Muse Spark Open on Baseten
 """
 
 from __future__ import annotations
@@ -31,8 +35,15 @@ from smoke._common import (
     load_photo,
     meta_client,
     muse_cost,
+    open_client,
     write_result,
 )
+
+# Provider: (model setting, default model, price setting prefix)
+PROVIDERS = {
+    "meta": ("MUSE_MODEL", "muse-spark-1.3", "MUSE"),
+    "open": ("OPEN_MODEL_ID", "meta-models/muse-spark-open-1026", "OPEN_MODEL"),
+}
 
 KINDS = ["observation", "record", "model", "hypothesis", "no_coverage"]
 
@@ -106,6 +117,10 @@ QUESTION = (
     "This photo was taken near Carroll St and 4th Ave in Brooklyn (about 40.6787, -73.9830) "
     "on 2026-08-23. Is there flooding, and are there 311 complaints about it nearby?"
 )
+TEXT_QUESTION = (
+    "A resident reports street flooding near Carroll St and 4th Ave in Brooklyn "
+    "(about 40.6787, -73.9830) on 2026-08-23. Are there 311 complaints about it nearby?"
+)
 
 
 def validate_claims(text: str, known_ids: set[str]) -> list[str]:
@@ -130,10 +145,11 @@ def validate_claims(text: str, known_ids: set[str]) -> list[str]:
 
 
 class Runner:
-    def __init__(self, image_url: str) -> None:
-        self.client = meta_client()
-        self.model = os.environ.get("MUSE_MODEL") or "muse-spark-1.3"
-        self.guard = SpendGuard(max_calls=10)
+    def __init__(self, image_url: str, provider: str = "meta") -> None:
+        model_setting, default_model, self.price_prefix = PROVIDERS[provider]
+        self.client = meta_client() if provider == "meta" else open_client()
+        self.model = os.environ.get(model_setting) or default_model
+        self.guard = SpendGuard(max_calls=12)
         self.image_part = {"type": "image_url", "image_url": {"url": image_url}}
 
     def call(self, messages: list[dict[str, Any]], **options: Any) -> Any:
@@ -141,12 +157,19 @@ class Runner:
         response = self.client.chat.completions.create(
             model=self.model, messages=messages, **options
         )
-        self.guard.record(muse_cost(response.usage))
+        self.guard.record(muse_cost(response.usage, self.price_prefix))
         return response
 
-    def user_message(self, text: str) -> dict[str, Any]:
+    def user_message(self, text: str, with_image: bool = True) -> dict[str, Any]:
         # Images are accepted only in user messages.
+        if not with_image:
+            return {"role": "user", "content": text}
         return {"role": "user", "content": [{"type": "text", "text": text}, self.image_part]}
+
+    def step_text(self) -> dict[str, Any]:
+        response = self.call([self.user_message("Reply with: ready", with_image=False)])
+        content = response.choices[0].message.content
+        return {"ok": bool(content), "answer": content}
 
     def step_image(self) -> dict[str, Any]:
         response = self.call([self.user_message("Describe the street in this photo in one sentence.")])
@@ -174,15 +197,17 @@ class Runner:
         problems = validate_claims(content, {"photo"})
         return {"ok": not problems, "problems": problems, "answer": content}
 
-    def step_all(self, max_turns: int = 4) -> dict[str, Any]:
+    def step_all(self, with_image: bool = True, max_turns: int = 4) -> dict[str, Any]:
         system = (
             "You investigate New York City streets. Label every claim: 'observation' for what "
             "the photo shows (evidence_ids ['photo']), 'record' for what a tool result states "
             "(cite its record id), 'hypothesis' for inferences. Cite only ids you were given."
         )
+        question = QUESTION if with_image else TEXT_QUESTION
+        known_ids = {"photo", FIXTURE_RECORD_ID} if with_image else {FIXTURE_RECORD_ID}
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system},
-            self.user_message(QUESTION),
+            self.user_message(question, with_image),
         ]
         tool_calls_made = 0
         for _ in range(max_turns):
@@ -192,7 +217,7 @@ class Runner:
             choice = response.choices[0]
             if choice.finish_reason != "tool_calls":
                 content = choice.message.content
-                problems = validate_claims(content, {"photo", FIXTURE_RECORD_ID})
+                problems = validate_claims(content, known_ids)
                 if tool_calls_made == 0:
                     problems.append("model answered without calling the tool")
                 return {
@@ -214,18 +239,32 @@ class Runner:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("photo", type=Path)
+    parser.add_argument(
+        "--provider",
+        choices=sorted(PROVIDERS),
+        default="meta",
+        help="meta: Meta Model API; open: Muse Spark Open on Baseten",
+    )
     args = parser.parse_args()
     load_env()
 
     jpeg, size = load_photo(args.photo)
-    runner = Runner(data_url(jpeg))
+    runner = Runner(data_url(jpeg), args.provider)
     steps = {
+        "0 text only": runner.step_text,
         "1 image": runner.step_image,
         "2 image + tools": runner.step_tools,
         "3 image + strict schema": runner.step_schema,
         "4 image + tools + strict schema": runner.step_all,
+        "5 text + tools + strict schema": lambda: runner.step_all(with_image=False),
     }
-    results: dict[str, Any] = {"model": runner.model, "photo_size": size, "steps": {}}
+    print(f"Provider: {args.provider}, model: {runner.model}\n")
+    results: dict[str, Any] = {
+        "provider": args.provider,
+        "model": runner.model,
+        "photo_size": size,
+        "steps": {},
+    }
     for name, step in steps.items():
         started = time.monotonic()
         try:
@@ -243,7 +282,7 @@ def main() -> None:
         if "error" in outcome:
             print(f"      - {outcome['error']}")
     results["spent_today_usd_estimate"] = round(runner.guard.spent_today(), 4)
-    path = write_result("muse_spark", results)
+    path = write_result(f"muse_spark_{args.provider}", results)
     print(f"\nDetails: {path}  (estimated spend today: ${results['spent_today_usd_estimate']})")
 
 

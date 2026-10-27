@@ -321,6 +321,7 @@ def from_pluto(row: dict[str, Any], dataset: str) -> Evidence | None:
     ]
     flood_zone = "inside the 2007 FEMA flood zone" if str(row.get("firm07_flag") or "") == "1" else None
     version = row.get("version")
+    address = join_address(row.get("address"))
     return Evidence(
         id=f"pluto:{bbl}",
         kind="record",
@@ -328,14 +329,14 @@ def from_pluto(row: dict[str, Any], dataset: str) -> Evidence | None:
         category="lot",
         source=f"PLUTO property data{f' {version}' if version else ''}",
         dataset=dataset,
-        summary="Property lot: " + ", ".join(part for part in [*details, flood_zone] if part),
+        summary=f"Property lot{f' at {address}' if address else ''}: " + ", ".join(part for part in [*details, flood_zone] if part),
         lat=lat,
         lon=lon,
         located_by="lot",
         start=None,
         end=None,
         url=record_url(dataset, bbl=str(row.get("bbl"))),
-        address=join_address(row.get("address")),
+        address=address,
         bbl=bbl,
         raw=row,
     )

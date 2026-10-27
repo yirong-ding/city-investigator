@@ -165,3 +165,15 @@ Lessons:
 |---|---|---|
 | Sidewalk | 214 to 218 Court St, with 230 Court St on the same block | Photos from the same day: a shed the photo confirms (permits issued Feb 2025, shed visible in March) and one it contradicts (230 Court St: permits valid since July 2022, no shed visible) |
 | Flooding | Carroll St/4th Av sensor, Aug 23, 2026 | Sensor flooding from 06:45 local (28.1 in at the sensor), heaviest rain in the hour ending 07:51 at Central Park, 311 complaints at 09:48, 21:13 and 21:25 |
+
+# Day 3 findings: the investigate command on the demo photos (Oct 27, 2026)
+
+| Run | Observed | Key records | Flags |
+|---|---|---|---|
+| 214 to 218 Court St, photo 1306991370360816 (2025-03-30) | Scaffolding, confidence 0.55, about 3% of the image | Shed permits valid on the photo date at 214, 216, 218, 224 and 226 Court St; 226 Court St permitted without a break since 2021-08-19; 218 Court St had an earlier shed in 2017 to 2018 | Agreement: consistent with the permits (the photo alone does not show which building's permit covers it); a 42-day paperwork gap at 224 Court St |
+| 230 Court St, photo 1332532847863656 (2025-03-30) | No scaffolding, fence or barrier | Shed permits at 226 and 230 Court St within 20 m; 230 Court St permitted without a break since 2022-07-14; a 311 complaint 2 m away on 2025-01-29: "Sidewalk Shed/Pipe Scafford - Inadequate Defective/None" | Conflict: permits valid within 20 m of the camera, no scaffolding visible |
+| Carroll St/4th Av, photo 1385498442151420 (2024-04-04), question about 2026-08-23 | No water, puddle or catch basin (a dry day) | Two FloodNet events on Aug 23 (from 06:45, 28.1 in); 0.96 in of rain at Central Park, heaviest hour ending 07:51; two catch basin complaints and one indoor backup | Different moments (2024 photo, 2026 question); complaints lag the sensor: first street complaint about 14 hours later, first indoor backup about 3 hours later |
+
+Recurrence at Carroll St/4th Av within 150 m: FloodNet 17 events on 13 days since 2021-07-15 (deepest 35.94 in); 311 street flooding and catch basins 82 complaints on 65 days since 2010; 50 indoor sewer backups. Recurring by the 3-day definition for both sources.
+
+Fixes made after reading the real output: gaps over 180 days are separate earlier sheds, not paperwork gaps; permit status is labeled as today's status; the agreement flag says "consistent with"; lots come from the permit buildings; only permits within 20 m of the camera can contradict the photo; complaint timing separates street complaints from indoor backups.

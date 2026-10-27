@@ -19,6 +19,8 @@ from typing import Any
 
 import requests
 
+from city_investigator.meta import SpendGuard, data_url, env_float, load_photo, meta_client
+from city_investigator.segment import draw_overlay, segment, summarize
 from city_investigator.settings import ROOT, load_env
 
 OUTPUT = ROOT / "data" / "private" / "mapillary"
@@ -48,9 +50,6 @@ def fetch_image(photo_id: str, token: str, session: requests.Session | None = No
 
 async def check(photo_ids: list[str], concepts: list[str]) -> dict[str, dict[str, float | None]]:
     """Segment each photo; return the best confidence per concept (None: nothing found)."""
-    # The SAM client, parser and overlay drawing from the Day 1 smoke test.
-    from smoke._common import SpendGuard, data_url, env_float, load_photo, meta_client
-    from smoke.sam import draw_overlay, segment, summarize
 
     token = os.environ.get("MAPILLARY_TOKEN")
     if not token:

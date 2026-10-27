@@ -4,7 +4,7 @@
 
 Built for the Meta Global AI Developer Hackathon (Oct 26 to Nov 4, 2026).
 
-> **Status:** Day 2. The data layer is in [`city_investigator/`](city_investigator/); the Day 1 smoke tests and findings are in [`smoke/`](smoke/README.md).
+> **Status:** Day 3. One command runs a whole investigation in the terminal. The Day 1 and 2 findings, including the chosen demo sites, are in [`smoke/FINDINGS.md`](smoke/FINDINGS.md).
 
 ## What it does
 
@@ -45,6 +45,18 @@ python -m pytest tests # offline checks, no key needed
 ```
 
 Then run the [Day 1 smoke tests](smoke/README.md).
+
+## Investigate
+
+```bash
+python -m city_investigator.investigate 1306991370360816 --question "What records relate to this blocked sidewalk?"
+python -m city_investigator.investigate 1385498442151420 --question "Is flooding a recurring problem here?" --when 2026-08-23
+python -m city_investigator.investigate my_photo.jpg --question "Is this flooding recurring?"
+```
+
+The source is a Mapillary photo ID or your own photo. The command confirms where and when the photo was taken, blurs faces and license plates (Mapillary photos arrive already blurred), finds what the question is about with SAM 3.1, gathers records and coverage notes for that place and time, and runs rule-based checks. Results go to `data/private/investigations/` (never committed): the blurred photo, an overlay, and `result.json`.
+
+Checks raise typed flags: a permit that matches the structure in the photo, a structure with no permit, a permit with no visible structure, permit chain gaps, a sensor flood nobody reported, complaints the sensor did not see, water with no rain, complaints arriving hours after the sensor, and a photo taken at a different moment from the one asked about. Flooding questions also get a recurrence summary per source, with its definition.
 
 ## Data layer
 

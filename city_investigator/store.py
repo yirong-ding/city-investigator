@@ -256,6 +256,11 @@ class Store:
                 best = Hit(lot, distance)
         return best
 
+    def rain_total(self, start: datetime, end: datetime) -> float | None:
+        """Inches measured between start and end, or None if there are no readings."""
+        readings = [inches for moment, inches in self.rain if start <= moment <= end]
+        return round(sum(readings), 2) if readings else None
+
     def rain_summary(self, start: datetime, end: datetime) -> Evidence | None:
         readings = [(moment, inches) for moment, inches in self.rain if start <= moment <= end]
         if not readings:

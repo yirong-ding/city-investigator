@@ -9,6 +9,7 @@ import pytest
 from meta_sam_parser import CompletedOutcome, decode_mask_to_raster, image_segmentation_format
 from PIL import Image
 
+from city_investigator import meta
 from smoke import _common
 from smoke._common import SpendCapError, SpendGuard, load_photo
 from smoke.muse_spark import validate_claims
@@ -24,7 +25,7 @@ SAM_LINE = (
 @pytest.fixture
 def ledger(tmp_path, monkeypatch):
     path = tmp_path / "spend.json"
-    monkeypatch.setattr(_common, "LEDGER", path)
+    monkeypatch.setattr(meta, "LEDGER", path)
     return path
 
 

@@ -273,6 +273,11 @@ class Store:
         readings = [inches for moment, inches in self.rain if start <= moment <= end]
         return round(sum(readings), 2) if readings else None
 
+    def rain_peak(self, start: datetime, end: datetime) -> tuple[datetime, float] | None:
+        """The wettest hourly reading between start and end: (end of that hour, inches)."""
+        readings = [(moment, inches) for moment, inches in self.rain if start <= moment <= end]
+        return max(readings, key=lambda item: item[1]) if readings else None
+
     def rain_summary(self, start: datetime, end: datetime) -> Evidence | None:
         readings = [(moment, inches) for moment, inches in self.rain if start <= moment <= end]
         if not readings:

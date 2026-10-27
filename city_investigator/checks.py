@@ -26,6 +26,7 @@ MOMENT_TOLERANCE = timedelta(hours=12)
 # Modeled flooding this close to the place counts as the model expecting flooding there.
 MODEL_NEAR_M = 50
 CURRENT_SCENARIO = "moderate_current"
+DESIGN_STORM_IN_HR = 2.13  # the rain rate of the city's moderate design storm
 
 
 @dataclass
@@ -103,6 +104,7 @@ def flood_checks(
     photo_time: datetime | None,
     when: datetime | None,
     model_coverage_state: str | None = None,
+    rain_peak_in: float | None = None,
 ) -> list[Flag]:
     """moment_hits are records around the moment asked about, plus the flood model's estimates."""
     flags: list[Flag] = []
@@ -175,6 +177,16 @@ def flood_checks(
             "storm with today's sea levels: this is a place the city expects to flood.",
             ids(recorded) + [modeled.id],
         ))
+        if rain_peak_in is not None and rain_peak_in < DESIGN_STORM_IN_HR:
+            rain = [item for item in moment_hits if item.category == "rainfall"]
+            flags.append(Flag(
+                "flooded_in_lighter_rain", GAP,
+                f"It flooded although the wettest hour measured at the Central Park weather station had "
+                f"{rain_peak_in:.2f} in of rain, under the {DESIGN_STORM_IN_HR} in/hr of the moderate storm the "
+                "city's model uses. Rain here, miles from Central Park, may have been heavier, or this spot may "
+                "flood in smaller storms than the model's.",
+                ids(recorded) + [modeled.id] + ids(rain),
+            ))
     elif recorded and model_coverage_state in {"found", "nothing_found"}:
         flags.append(Flag(
             "model_misses_flooding", GAP,

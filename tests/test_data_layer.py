@@ -156,6 +156,13 @@ def test_flood_lookup_finds_records_and_rain(store):
     assert "0.79 in" in rain.summary
 
 
+def test_wettest_hour_is_found(store):
+    start, end = window("2026-08-22", "2026-08-26")
+    moment, inches = store.rain_peak(start, end)
+    assert inches == pytest.approx(0.49) and moment == datetime(2026, 8, 23, 11, 51, tzinfo=timezone.utc)
+    assert store.rain_peak(*window("2026-09-01", "2026-09-02")) is None
+
+
 def test_no_sensor_nearby_is_no_coverage(store):
     result = store.near(40.6600, -74.0200, 150, topic="flooding")
     note = by_source(result)["FloodNet flood sensors"]
@@ -517,3 +524,22 @@ def test_one_failing_flood_layer_does_not_lose_the_others(tmp_path, capsys):
     assert payload["failed"] == [{"key": "extreme_2080", "error": "TimeoutError: read timed out"}]
     out = capsys.readouterr().out
     assert "stormwater moderate_current: 1 map features read" in out and "extreme_2080: FAILED" in out
+
+
+def test_flood_layer_timeouts_are_retried_one_shape_at_a_time(tmp_path, monkeypatch, capsys):
+    import requests
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(snapshot, "ARCGIS_RETRY_WAIT_S", 0)
+
+    class SlowServer(FloodMapServer):
+        def get(self, url, params=None, timeout=None):
+            if url.endswith("/query") and params["resultRecordCount"] > 1:
+                raise requests.HTTPError("504 Gateway Timeout", response=SimpleNamespace(status_code=504))
+            return super().get(url, params, timeout)
+
+    server = SlowServer({"Extreme_Flood_Map_2080_Sea_Level_Rise": [feature(1, square(*CORNER, 10)),
+                                                                   feature(2, square(*CORNER, 5))]})
+    payload = snapshot.fetch_stormwater(tmp_path, server)
+    assert [f["category"] for f in payload["scenarios"][0]["features"]] == [1, 2]
+    assert "server timed out (504), retrying one shape at a time" in capsys.readouterr().out

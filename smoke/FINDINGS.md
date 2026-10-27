@@ -214,3 +214,9 @@ Flood demo rerun with the tools (Carroll St/4th Av, hosted Muse Spark 1.3, about
 - **Muse Spark settled the "street drains" disagreement itself.** It asked SAM 3.1 for "storm drain" and SAM found 5 regions (best 0.89), where our fixed prompt "catch basin" had found nothing. The flooding prompts now use "storm drain".
 - It read the 311 resolutions: debris blocking the catch basin, and "surcharge" from heavy rain for the backup.
 - The flood maps were missing ("not loaded"): the snapshot read the moderate layers but saved nothing because the extreme 2080 layer did not finish. Each layer now saves on its own, with progress printed per page.
+
+Flood demo with the city's flood model loaded (hosted Muse Spark 1.3, 48.7 s, about $0.08): 12 of 12 claims passed, 4 lookups.
+
+- The moderate-storm model (today's and 2050 sea levels) maps **deep and contiguous flooding (1 ft or more) at the corner itself**, nuisance flooding 7 m away. New flag: the model, the sensor and the complaints agree this is a place that floods. Muse Spark wrote its first **model** claim.
+- **Finding:** the wettest hour at Central Park on Aug 23 had 0.49 in of rain, a quarter of the model's 2.13 in/hr design storm, yet the sensor measured 28.1 in. A new flag says so: rain in Brooklyn may have been heavier, or the corner floods in smaller storms than the model's.
+- The extreme 2080 layer timed out on the server (504): its citywide shapes are huge. Timeouts now retry one shape at a time; the two moderate layers saved on their own.

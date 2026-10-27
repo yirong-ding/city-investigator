@@ -50,6 +50,9 @@ from city_investigator.socrata import Socrata, SocrataError
 
 IEM_URL = "https://mesonet.agron.iastate.edu/cgi-bin/request/asos.py"
 ARCGIS_PAGE = 1000
+ARCGIS_RETRIES = 3
+ARCGIS_RETRY_WAIT_S = 10
+GATEWAY_ERRORS = {502, 503, 504}
 STORMWATER_SIMPLIFY_DEG = 0.000005  # about half a meter; the maps are drawn on a coarser grid
 STORMWATER_GRID_DEG = 0.000001
 
@@ -212,14 +215,24 @@ def stormwater_features(
 
     south, west, north, east = bounds
     parts: dict[int, list[Any]] = {}
-    offset = 0
+    offset, page_size, retries = 0, ARCGIS_PAGE, 0
     while True:
-        page = arcgis_json(
-            session, f"{layer}/query", f="geojson", where="1=1", outFields="*", returnGeometry="true",
-            geometry=f"{west},{south},{east},{north}", geometryType="esriGeometryEnvelope", inSR=4326,
-            spatialRel="esriSpatialRelIntersects", outSR=4326, geometryPrecision=6,
-            maxAllowableOffset=STORMWATER_SIMPLIFY_DEG, resultOffset=offset, resultRecordCount=ARCGIS_PAGE,
-        )
+        try:
+            page = arcgis_json(
+                session, f"{layer}/query", f="geojson", where="1=1", outFields="*", returnGeometry="true",
+                geometry=f"{west},{south},{east},{north}", geometryType="esriGeometryEnvelope", inSR=4326,
+                spatialRel="esriSpatialRelIntersects", outSR=4326, geometryPrecision=6,
+                maxAllowableOffset=STORMWATER_SIMPLIFY_DEG, resultOffset=offset, resultRecordCount=page_size,
+            )
+        except requests.HTTPError as error:
+            status = getattr(error.response, "status_code", None)
+            if status not in GATEWAY_ERRORS or retries >= ARCGIS_RETRIES:
+                raise
+            # Citywide shapes are huge: asking for one at a time gives the server less to do.
+            retries, page_size = retries + 1, 1
+            print(f"      stormwater {label}: server timed out ({status}), retrying one shape at a time", flush=True)
+            time.sleep(ARCGIS_RETRY_WAIT_S * retries)
+            continue
         features = page.get("features") or []
         for feature in features:
             category = flood_category(feature.get("properties") or {})

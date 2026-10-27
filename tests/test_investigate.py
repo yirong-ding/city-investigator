@@ -215,3 +215,11 @@ def test_flood_model_is_compared_with_recorded_flooding():
     assert "model_misses_flooding" in types([event], "nothing_found")
     assert not {"model_expects_flooding", "model_misses_flooding"} & types([event], None)  # maps not loaded
     assert not {"model_expects_flooding", "model_misses_flooding"} & types([indoor], "nothing_found")  # indoor only
+
+    def lighter_rain(peak):
+        flags = flood_checks([], [event, model], 1.0, "found", when, when, "found", peak)
+        return [f for f in flags if f.type == "flooded_in_lighter_rain"]
+
+    [flag] = lighter_rain(0.49)
+    assert "0.49 in of rain, under the 2.13 in/hr" in flag.message and "stormwater:moderate_current" in flag.evidence_ids
+    assert lighter_rain(2.5) == [] and lighter_rain(None) == []

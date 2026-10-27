@@ -351,11 +351,15 @@ async def investigate(args: argparse.Namespace) -> dict[str, Any]:
     else:
         hits, coverage, rec, rain_before, sensor_state = gather_flooding(store, photo.lat, photo.lon, radius, when)
         model_state = next((c.state for c in coverage if c.source == "City stormwater flood maps"), None)
+        peak = store.rain_peak(when - timedelta(hours=24), when + timedelta(hours=72))
         flags = flood_checks(
-            observations, [hit.evidence for hit in hits], rain_before, sensor_state, photo.taken_at, when, model_state
+            observations, [hit.evidence for hit in hits], rain_before, sensor_state, photo.taken_at, when, model_state,
+            peak[1] if peak else None,
         )
         extra["recurrence"] = rec
         extra["rain_in_24h_before"] = rain_before
+        if peak:
+            extra["rain_wettest_hour"] = {"inches": peak[1], "ending": times.to_local(peak[0]).strftime("%Y-%m-%d %H:%M")}
 
     run_dir = OUTPUT / f"{times.now():%Y%m%d-%H%M%S}-{photo.ref.replace('.', '_')}"
     run_dir.mkdir(parents=True, exist_ok=True)

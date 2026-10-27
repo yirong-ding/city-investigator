@@ -151,3 +151,17 @@ Lessons:
 
 - **230 Court St is a real records-versus-photo conflict.** Shed permits have been valid continuously since July 2022, the building was clearly renovated between 2020 and 2025, yet the 2025 photo shows no shed on the Court St front. Either the shed is on another side, or it came down while the permit stayed open. Good material for "What has changed here?" and for showing that a permit is authorization, not presence.
 - **Distance and direction are not enough to pick photos.** Near 431 Hicks St, the closest photos come from the expressway below street level. Candidate photos need a visual check; `find_shed_photos` uses SAM 3.1 for that.
+
+## Shed photo search and demo sites (Oct 27, 2026)
+
+`find_shed_photos` searched 2,097 shed permit chains with permits since 2014: 182 had a Mapillary photo within 15 m, facing the building, taken while the permits were valid. SAM 3.1 checked the 10 newest and found scaffolding in two (279 Van Brunt St, 0.59; 214 Court St, 0.55).
+
+- **"Sidewalk shed" never matched anything; "scaffolding" works.** The app prompts for "scaffolding".
+- **214 Court St, photo 1306991370360816 (RobinZyx, 2025-03-30, CC BY-SA 4.0), checked by eye:** a green sidewalk shed along several storefronts, people underneath. SAM's mask covers the shed's poles and cross-bracing, not its roof. The photo shows a building sign reading "218 Court Street" and a contractor banner listing "Sidewalk Shed | Scaffolding", so the sign itself points to the permit. Shed permits for 214, 216 and 218 Court St were issued in February 2025, six weeks before the photo.
+
+**Demo sites:**
+
+| Demo | Site | Story |
+|---|---|---|
+| Sidewalk | 214 to 218 Court St, with 230 Court St on the same block | Photos from the same day: a shed the photo confirms (permits issued Feb 2025, shed visible in March) and one it contradicts (230 Court St: permits valid since July 2022, no shed visible) |
+| Flooding | Carroll St/4th Av sensor, Aug 23, 2026 | Sensor flooding from 06:45 local (28.1 in at the sensor), heaviest rain in the hour ending 07:51 at Central Park, 311 complaints at 09:48, 21:13 and 21:25 |

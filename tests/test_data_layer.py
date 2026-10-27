@@ -543,3 +543,27 @@ def test_flood_layer_timeouts_are_retried_one_shape_at_a_time(tmp_path, monkeypa
     payload = snapshot.fetch_stormwater(tmp_path, server)
     assert [f["category"] for f in payload["scenarios"][0]["features"]] == [1, 2]
     assert "server timed out (504), retrying one shape at a time" in capsys.readouterr().out
+
+
+def test_probe_lists_complaints_and_datasets(monkeypatch, tmp_path, capsys):
+    from city_investigator import probe
+
+    class Session:
+        headers = {}
+
+        def get(self, url, params=None, timeout=None):
+            if url == probe.CATALOG:
+                return FakeResponse({"results": [{"resource": {"id": "hn5i-inap", "name": params["q"], "data_updated_at": "2026-10-01T00:00:00", "columns_field_name": ["tpstructure", "genusspecies"]}}]})
+            return FakeResponse([
+                {"complaint_type": "Damaged Tree", "descriptor": "Branch or Limb Has Fallen Down", "agency": "DPR", "n": "41"},
+                {"complaint_type": "Noise - Residential", "descriptor": "Loud Music/Party", "agency": "NYPD", "n": "900"},
+            ])
+
+    monkeypatch.setattr(probe.requests, "Session", Session)
+    monkeypatch.setattr(probe, "DERIVED_DIR", tmp_path)
+    probe.main()
+    out = capsys.readouterr().out
+    assert "41  DPR  Damaged Tree | Branch or Limb Has Fallen Down" in out and "Noise" not in out
+    assert "hn5i-inap  Forestry Tree Points  (updated 2026-10-01)" in out
+    saved = json.loads((tmp_path / "probe.json").read_text())
+    assert len(saved["complaints"]) == 2 and saved["datasets"]["street trees"][0]["id"] == "hn5i-inap"

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 from test_data_layer import SHED, store  # noqa: F401  (store is a fixture)
-from test_investigate import BOX_LINE, photo_at, sam_result
+from test_investigate import BOX_LINE, photo_at, sam_result, white_jpeg
 
 from city_investigator import explain as ex
 from city_investigator import investigate as inv
@@ -179,6 +179,7 @@ def test_muse_spark_and_sam_disagreements_are_reported():
         observation("The corner has crosswalks and street drains."),  # SAM found no catch basin
         observation("No water is visible.", ["photo:not_seen:water"]),  # reports the absence
         observation("The street looks dry, with no standing water."),  # negated
+        observation("A storm drain sits at the curb.", ["photo:storm_drain"]),  # SAM verified it
     ], not_seen)
     assert len(notes) == 1 and "street drains" in notes[0] and "no catch basin" in notes[0]
 
@@ -194,3 +195,63 @@ def test_runs_are_found_by_photo_id(tmp_path, monkeypatch):
     assert ex.find_run(str(tmp_path / "20261027-2-222")).name == "20261027-2-222"
     with pytest.raises(SystemExit):
         ex.find_run("999")
+
+
+def test_muse_spark_verifies_the_photo_with_sam(sidewalk_result, store, monkeypatch):  # noqa: F811
+    asked = []
+
+    def fake_sam(jpeg, concept):
+        asked.append(concept)
+        return sam_result(BOX_LINE) if concept == "street sign" else sam_result()
+
+    flags = [f"flag:{flag['type']}" for flag in sidewalk_result["flags"]]
+    muse = FakeMuse([
+        reply(tool_calls=[tool_call("check_photo", concept="street sign"),
+                          tool_call("check_photo", concept="storm drain"),
+                          tool_call("get_record", evidence_id="311:1002")]),
+        reply(content="A sign is visible; no drain was found."),
+        reply(content=claims(
+            ("A street sign is visible.", "observation", ["photo:street_sign"]),
+            ("The corner has a storm drain.", "observation", ["photo"]),  # SAM found none
+            ("Records agree with the scaffolding.", "hypothesis", ["photo:scaffolding", "311:1002", *flags]),
+        )),
+    ])
+    explanation = ex.explain(sidewalk_result, white_jpeg(), "meta", client=muse, store=store, segmenter=fake_sam)
+    assert asked == ["street sign", "storm drain"]
+    assert muse.requests[0]["tools"][0]["function"]["name"] == "check_photo"
+    assert "0.75" in explanation["evidence"]["photo:street_sign"]["summary"]
+    assert len(explanation["models_disagree"]) == 1 and "no storm drain" in explanation["models_disagree"][0]
+    report = ex.render(explanation)
+    assert "- check_photo(street sign): SAM 3.1 found street sign" in report
+    assert "- get_record(311:1002): read" in report
+
+
+def test_photo_checks_are_capped(sidewalk_result):
+    tools = ex.Toolbox(sidewalk_result, ex.evidence_list(sidewalk_result), jpeg=white_jpeg(),
+                       segmenter=lambda jpeg, concept: sam_result())
+    for _ in range(ex.MAX_PHOTO_CHECKS):
+        assert tools.run("check_photo", json.dumps({"concept": "ramp"}))["id"].startswith("photo:not_seen:ramp")
+    assert "at most" in tools.run("check_photo", json.dumps({"concept": "ramp"}))["error"]
+    assert ex.Toolbox(sidewalk_result, {}).tools == ex.TOOLS  # no photo, no photo checks
+
+
+def test_sources_show_address_and_distance(sidewalk_result):
+    known = ex.evidence_list(sidewalk_result)
+    permit = next(eid for eid, item in known.items() if item.get("summary", "").startswith("DOB permit"))
+    explanation = {
+        "question": "Q", "model": "m", "claims": [], "flags": [], "dropped": [], "warnings": [],
+        "models_disagree": [], "tool_calls": [], "evidence": {permit: known[permit]}, "photo_credit": None,
+        "repairs": 0, "model_calls": 2, "estimated_cost_usd": 0.01,
+    }
+    assert f"`{permit}` (1 TEST STREET, 0 m away): DOB permit" in ex.render(explanation)
+
+
+def test_sam_can_be_called_inside_a_running_event_loop(monkeypatch):
+    async def fake_segment_once(jpeg, concept):
+        return concept
+
+    async def inside_investigate():
+        return ex.segment_now(b"", "storm drain")
+
+    monkeypatch.setattr(ex, "_segment_once", fake_segment_once)
+    assert ex.asyncio.run(inside_investigate()) == "storm drain"

@@ -188,3 +188,10 @@ First real run, Carroll St/4th Av flooding (photo 1385498442151420, question abo
 - **Muse Spark and SAM 3.1 disagreed:** Muse Spark said the photo shows "street drains"; SAM 3.1 found no catch basin. A rule now reports this kind of disagreement instead of letting either model win silently.
 
 Fixes made after reading the output: the FloodNet coverage note named every sensor in range as if both had recorded the events (both were at Carroll St/4th Av); the sources list repeated the flags; the report now gives this run's own cost and a one-line summary of the checks.
+
+Second run, 230 Court St (photo 1332532847863656), hosted Muse Spark 1.3: 10 of 10 claims passed, 2 model calls, about $0.045.
+
+- It explained the conflict without blame: the permitted sheds "may be out of frame, on another side, or already down, because a permit shows authorization not that it is standing."
+- It did the date arithmetic right: 5 permits in the search window, 4 valid on the photo date (224 Court St's permit had ended 3 days earlier).
+- **It made no tool calls in either run.** Muse Spark only summarized evidence handed to it. Changed: Muse Spark now has `check_photo` (SAM 3.1 as a tool) to verify what it thinks it sees before claiming it, and is told to read complaint resolutions and permits with `get_record`. The report lists every check.
+- The sources list now shows each record's address and distance, so a claim such as "permits at 239 Court Street" can be checked. Muse Spark no longer describes people in the photo.

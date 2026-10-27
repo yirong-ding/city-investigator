@@ -68,7 +68,14 @@ python -m city_investigator.explain 1306991370360816         # the newest run of
 python -m city_investigator.explain latest --provider open   # Muse Spark Open on Baseten
 ```
 
-Muse Spark gets the question, the blurred photo and every piece of evidence with an ID. It can call three tools that look further in the local snapshots: `search_records` (any period around the confirmed pin), `building_records` (everything filed under one building) and `get_record` (every field of one record). It answers in short claims, each labeled observation, record, model, hypothesis or no_coverage and citing evidence IDs. It also reads signs and building numbers in the photo.
+Muse Spark gets the question, the blurred photo and every piece of evidence with an ID, then checks what matters with four tools:
+
+- `check_photo`: asks SAM 3.1 to find something in the photo, so Muse Spark verifies what it thinks it sees (a drain, a sign, a ramp) before claiming it. At most 4 checks.
+- `get_record`: every field of one record, such as what the city did about a complaint (`resolution_description`).
+- `search_records`: any period around the confirmed pin.
+- `building_records`: everything filed under one building.
+
+It answers in short claims, each labeled observation, record, model, hypothesis or no_coverage and citing evidence IDs, including the IDs its tool calls returned. The report lists what it checked.
 
 Code checks every claim before it is shown:
 

@@ -1,9 +1,10 @@
 """Write the explanation: Muse Spark turns one investigation into short, labeled, cited claims.
 
 Muse Spark gets the question, the blurred photo and every piece of evidence the
-investigation gathered, each with an ID. It may call tools to look further in the
-local snapshots. It answers in claims labeled observation, record, model, hypothesis
-or no_coverage, each citing evidence IDs.
+investigation gathered, each with an ID. It calls tools to check what matters: SAM 3.1
+to verify what it thinks it sees in the photo, and lookups in the local snapshots. It
+answers in claims labeled observation, record, model, hypothesis or no_coverage, each
+citing evidence IDs.
 
 Code then checks every claim. A claim that cites an ID that does not exist, or whose
 label does not fit what it cites (an "observation" that cites a 311 complaint), is
@@ -20,9 +21,13 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import asyncio
+import io
 import json
 import re
 import time
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -31,7 +36,17 @@ from city_investigator import times
 from city_investigator.config import DROPPED_FIELDS, RAIN_STATION
 from city_investigator.evidence import Evidence
 from city_investigator.investigate import MIN_CONFIDENCE, OUTPUT
-from city_investigator.meta import PROVIDERS, SpendCapError, SpendGuard, chat_client, data_url, muse_cost
+from city_investigator.meta import (
+    PROVIDERS,
+    SpendCapError,
+    SpendGuard,
+    chat_client,
+    data_url,
+    env_float,
+    meta_client,
+    muse_cost,
+)
+from city_investigator.segment import segment, summarize
 from city_investigator.settings import load_env
 from city_investigator.store import Coverage, Hit, Store
 
@@ -51,7 +66,8 @@ NEEDS = {
     "hypothesis": {"photo", "record", "model", "coverage", "flag"},
     "no_coverage": {"coverage"},
 }
-MAX_TOOL_TURNS = 4
+MAX_TOOL_TURNS = 5
+MAX_PHOTO_CHECKS = 4
 MAX_REPAIRS = 1
 MAX_RECORDS = 80
 MAX_TOOL_ITEMS = 40
@@ -88,15 +104,40 @@ Rules:
 - A permit shows authorization, not that a structure is physically up. Complaints show that someone \
 reported, not how bad a problem was. A sensor measures one spot.
 - If the photo was taken at a different time than the question asks about, it shows the place, not that moment.
-- Say nothing about who owns or runs a building, and do not assign blame.
+- Say nothing about who owns or runs a building, and do not assign blame. Do not describe people in the photo.
 - Use the local dates given. Write 6 to 12 claims.
-- Call a tool only if the evidence list cannot answer the question, for example to read a permit's full \
-record or to check a longer period."""
+
+Use the tools to check what matters before you answer:
+- Before saying the photo shows something specific that matters to the answer (a drain, a sign, a ramp, \
+a barrier), check it with check_photo and cite the id it returns. If SAM 3.1 does not find it, say so.
+- Read the complaints and permits that matter with get_record: a complaint's resolution_description \
+says what the city did about it.
+- Use search_records or building_records when a longer period or a whole building's history would \
+change the answer."""
 
 REWRITE = (
     "Now write your answer as labeled claims in the required format: one claim per fact or inference, "
     "citing only ids from the evidence list or tool results."
 )
+
+CHECK_PHOTO_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "check_photo",
+        "description": (
+            "Ask SAM 3.1 to find something in the photo, to verify what you think you see. Returns a photo "
+            f"evidence id with what it found. At most {MAX_PHOTO_CHECKS} checks."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "concept": {"type": "string", "description": "a short noun phrase, such as 'storm drain' or 'street sign'"},
+            },
+            "required": ["concept"],
+            "additionalProperties": False,
+        },
+    },
+}
 
 TOOLS = [
     {
@@ -209,6 +250,17 @@ def evidence_item(record: dict[str, Any]) -> dict[str, Any]:
     return item
 
 
+def not_seen_item(concept: str) -> dict[str, Any]:
+    return {
+        "id": f"photo:not_seen:{slug(concept)}",
+        "type": "photo",
+        "summary": (
+            f"SAM 3.1 found no {concept} in the photo at confidence {MIN_CONFIDENCE} or above. "
+            "Segmentation can miss objects."
+        ),
+    }
+
+
 def for_model(item: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in item.items() if key != "url"}
 
@@ -285,14 +337,7 @@ def evidence_list(result: dict[str, Any]) -> dict[str, dict[str, Any]]:
     for observation in result["observations"]:
         add(evidence_item(observation) | {"type": "photo"})
     for concept in result["not_seen"]:
-        add({
-            "id": f"photo:not_seen:{slug(concept)}",
-            "type": "photo",
-            "summary": (
-                f"SAM 3.1 found no {concept} in the photo at confidence {MIN_CONFIDENCE} or above. "
-                "Segmentation can miss objects."
-            ),
-        })
+        add(not_seen_item(concept))
     for record in result["records"][:MAX_RECORDS]:
         add(evidence_item(record))
     for chain in result.get("shed_chains", []):
@@ -353,16 +398,53 @@ def question_text(result: dict[str, Any], known: dict[str, dict[str, Any]]) -> s
 # Tools
 
 
-class Toolbox:
-    """Tools Muse Spark may call: deterministic lookups in the local snapshots around the confirmed pin."""
+async def _segment_once(jpeg: bytes, concept: str) -> Any:
+    async with meta_client(async_client=True) as api:
+        return await segment(api, data_url(jpeg), concept)
 
-    def __init__(self, result: dict[str, Any], known: dict[str, dict[str, Any]], store: Store | None = None) -> None:
+
+def segment_now(jpeg: bytes, concept: str) -> Any:
+    """One SAM 3.1 request from synchronous code, even when called inside a running event loop."""
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, _segment_once(jpeg, concept)).result()
+
+
+def outcome(output: dict[str, Any]) -> str:
+    """A few words on what a tool returned, for the report."""
+    if output.get("error"):
+        return output["error"]
+    if "fields" in output:
+        return f"read {len(output['fields'])} fields"
+    if "evidence" in output:
+        return f"{len(output['evidence'])} records, {len(output['coverage'])} coverage notes"
+    return output.get("summary", "")
+
+
+class Toolbox:
+    """Tools Muse Spark may call: SAM 3.1 on the blurred photo, and lookups in the local snapshots."""
+
+    def __init__(
+        self,
+        result: dict[str, Any],
+        known: dict[str, dict[str, Any]],
+        store: Store | None = None,
+        jpeg: bytes | None = None,
+        guard: SpendGuard | None = None,
+        segmenter: Callable[[bytes, str], Any] | None = None,
+    ) -> None:
         location = result["photo"]["location"]
         self.lat, self.lon = location["lat"], location["lon"]
         self.known = known
         self._store = store
         self._index: dict[str, Evidence] | None = None
+        self.jpeg, self.guard, self.segmenter = jpeg, guard, segmenter or segment_now
+        self.not_seen: list[str] = []
+        self.photo_checks = 0
         self.calls: list[dict[str, Any]] = []
+
+    @property
+    def tools(self) -> list[dict[str, Any]]:
+        return [CHECK_PHOTO_TOOL, *TOOLS] if self.jpeg else TOOLS
 
     @property
     def store(self) -> Store:
@@ -372,6 +454,7 @@ class Toolbox:
 
     def run(self, name: str, arguments: str) -> dict[str, Any]:
         handlers = {
+            "check_photo": self.check_photo,
             "search_records": self.search_records,
             "building_records": self.building_records,
             "get_record": self.get_record,
@@ -379,9 +462,9 @@ class Toolbox:
         try:
             args: Any = json.loads(arguments or "{}")
             output = handlers[name](**args)
-        except (KeyError, TypeError, ValueError) as error:
+        except (KeyError, TypeError, ValueError, SpendCapError) as error:
             args, output = arguments, {"error": f"Could not run {name}: {error}"}
-        self.calls.append({"tool": name, "arguments": args, "error": output.get("error")})
+        self.calls.append({"tool": name, "arguments": args, "outcome": outcome(output)})
         return output
 
     def remember(self, item: dict[str, Any]) -> dict[str, Any]:
@@ -403,6 +486,41 @@ class Toolbox:
         if len(hits) > MAX_TOOL_ITEMS:
             answer["not_shown"] = f"{len(hits) - MAX_TOOL_ITEMS} older items; narrow the dates to see them"
         return answer
+
+    def check_photo(self, concept: str) -> dict[str, Any]:
+        concept = " ".join(str(concept).split())[:60]
+        if not self.jpeg or not concept:
+            raise ValueError("needs a photo and a concept")
+        if self.photo_checks >= MAX_PHOTO_CHECKS:
+            raise ValueError(f"at most {MAX_PHOTO_CHECKS} photo checks per explanation")
+        self.photo_checks += 1
+        if self.guard:
+            self.guard.check()
+        try:
+            found = self.segmenter(self.jpeg, concept)
+        finally:
+            if self.guard:
+                self.guard.record(env_float("SAM_USD_PER_IMAGE", 0.0025))
+        from PIL import Image
+
+        size = Image.open(io.BytesIO(self.jpeg)).size
+        boxes = [
+            box for box in summarize(found, concept, size)["boxes"]
+            if box["confidence"] is None or box["confidence"] >= MIN_CONFIDENCE
+        ]
+        if not boxes:
+            self.not_seen.append(concept)
+            item = not_seen_item(concept)
+        else:
+            best = max((box["confidence"] for box in boxes if box["confidence"] is not None), default=None)
+            best_text = f", highest confidence {best:.2f}" if best is not None else ""
+            item = {
+                "id": f"photo:{slug(concept)}",
+                "type": "photo",
+                "summary": f"SAM 3.1 found {concept} in the photo: {len(boxes)} region(s){best_text}",
+            }
+        item["id"] = unique(item["id"], self.known)
+        return self.remember(item)
 
     def search_records(self, topic: str, start_date: str, end_date: str, radius_m: float) -> dict[str, Any]:
         if topic not in ("flooding", "sidewalk"):
@@ -501,8 +619,9 @@ def vision_disagreements(claims: list[dict[str, Any]], not_seen: list[str]) -> l
     """Observations where Muse Spark reports something SAM 3.1 did not find. Either model can be wrong."""
     notes = []
     for claim in claims:
-        if claim["kind"] != "observation":
-            continue
+        sam_finds = [eid for eid in claim["evidence_ids"] if eid.startswith("photo:") and ":not_seen:" not in eid]
+        if claim["kind"] != "observation" or sam_finds:
+            continue  # only claims that rest on Muse Spark's own reading of the photo
         text = claim["text"].lower()
         for concept in not_seen:
             if f"photo:not_seen:{slug(concept)}" in claim["evidence_ids"]:
@@ -538,16 +657,17 @@ def explain(
     provider: str = "meta",
     client: Any = None,
     store: Store | None = None,
+    segmenter: Callable[[bytes, str], Any] | None = None,
 ) -> dict[str, Any]:
     if client is None:
         client, model, price_prefix = chat_client(provider)
     else:
         _, model, price_prefix = PROVIDERS[provider]
-    guard = SpendGuard(max_calls=MAX_TOOL_TURNS + 1 + MAX_REPAIRS)
+    guard = SpendGuard(max_calls=MAX_TOOL_TURNS + 1 + MAX_REPAIRS + MAX_PHOTO_CHECKS)
     known = evidence_list(result)
     # Every flag, and every source with no coverage, should be mentioned.
     required = [eid for eid, item in known.items() if item["type"] == "flag" or item.get("state") == "no_coverage"]
-    toolbox = Toolbox(result, known, store)
+    toolbox = Toolbox(result, known, store, jpeg, guard, segmenter)
     started = time.monotonic()
     cost = 0.0
 
@@ -567,7 +687,7 @@ def explain(
 
     # 1. Tools without the schema: Muse Spark Open ignores the schema when tools are in the request.
     for _ in range(MAX_TOOL_TURNS):
-        message = call(messages, tools=TOOLS, tool_choice="auto")
+        message = call(messages, tools=toolbox.tools, tool_choice="auto")
         if not message.tool_calls:
             messages.append({"role": "assistant", "content": message.content or ""})
             break
@@ -609,7 +729,7 @@ def explain(
         "warnings": warnings,
         "flags": result["flags"],
         "evidence": {eid: known[eid] for eid in cited},
-        "models_disagree": vision_disagreements(kept, result["not_seen"]),
+        "models_disagree": vision_disagreements(kept, result["not_seen"] + toolbox.not_seen),
         "tool_calls": toolbox.calls,
         "repairs": repairs,
         "photo_credit": result["photo"].get("credit"),
@@ -648,12 +768,21 @@ def render(explanation: dict[str, Any]) -> str:
         lines += ["", "## Removed or missing (evidence checks)", ""]
         lines += [f"- Removed: {claim_text(item['claim'])} ({'; '.join(item['problems'])})" for item in explanation["dropped"]]
         lines += [f"- {warning}" for warning in explanation["warnings"]]
+    if explanation["tool_calls"]:
+        lines += ["", "## What Muse Spark checked", ""]
+        for call in explanation["tool_calls"]:
+            args = call["arguments"]
+            shown = ", ".join(f"{value}" for value in args.values()) if isinstance(args, dict) else args
+            lines.append(f"- {call['tool']}({shown}): {call['outcome']}")
     lines += ["", "## Sources", ""]
     for eid, item in explanation["evidence"].items():
         if item["type"] == "flag":  # listed above
             continue
+        place = ", ".join(
+            part for part in (item.get("address"), f"{item['distance_m']} m away" if item.get("distance_m") is not None else None) if part
+        )
         link = f" {item['url']}" if item.get("url") else ""
-        lines.append(f"- `{eid}`: {item['summary']}{link}")
+        lines.append(f"- `{eid}`{f' ({place})' if place else ''}: {item['summary']}{link}")
     if explanation["photo_credit"]:
         lines += ["", f"Photo: {explanation['photo_credit']}"]
     kept, removed = len(explanation["claims"]), len(explanation["dropped"])

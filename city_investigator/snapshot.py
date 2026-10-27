@@ -51,6 +51,7 @@ from city_investigator.socrata import Socrata, SocrataError
 IEM_URL = "https://mesonet.agron.iastate.edu/cgi-bin/request/asos.py"
 ARCGIS_PAGE = 1000
 STORMWATER_SIMPLIFY_DEG = 0.000005  # about half a meter; the maps are drawn on a coarser grid
+STORMWATER_GRID_DEG = 0.000001
 
 
 def quoted(values: list[str]) -> str:
@@ -204,7 +205,6 @@ def flood_category(properties: dict[str, Any]) -> int | None:
 
 def stormwater_features(session: requests.Session, layer: str, bounds: tuple[float, float, float, float]) -> list[dict[str, Any]]:
     """Flood polygons in bounds (south, west, north, east), clipped and merged by flooding category."""
-    import numpy as np
     import shapely
     from shapely.geometry import shape
 
@@ -231,8 +231,9 @@ def stormwater_features(session: requests.Session, layer: str, bounds: tuple[flo
         if not features or not more:
             break
         offset += len(features)
+    # Merging on a fixed grid (1e-6 degrees, about 10 cm) is robust to near-coincident edges.
     merged = {
-        category: shapely.make_valid(shapely.transform(shapely.union_all(pieces), lambda xy: np.round(xy, 6)))
+        category: shapely.make_valid(shapely.union_all(pieces, grid_size=STORMWATER_GRID_DEG))
         for category, pieces in parts.items()
         if pieces
     }

@@ -203,7 +203,9 @@ def flood_category(properties: dict[str, Any]) -> int | None:
     return int(found.group(1)) if found else None
 
 
-def stormwater_features(session: requests.Session, layer: str, bounds: tuple[float, float, float, float]) -> list[dict[str, Any]]:
+def stormwater_features(
+    session: requests.Session, layer: str, bounds: tuple[float, float, float, float], label: str = "layer"
+) -> list[dict[str, Any]]:
     """Flood polygons in bounds (south, west, north, east), clipped and merged by flooding category."""
     import shapely
     from shapely.geometry import shape
@@ -228,6 +230,7 @@ def stormwater_features(session: requests.Session, layer: str, bounds: tuple[flo
             polygons = [part for part in shapely.get_parts(clipped) if part.geom_type in ("Polygon", "MultiPolygon")]
             parts.setdefault(category, []).extend(polygons)
         more = page.get("exceededTransferLimit") or (page.get("properties") or {}).get("exceededTransferLimit")
+        print(f"      stormwater {label}: {offset + len(features)} map features read", flush=True)
         if not features or not more:
             break
         offset += len(features)
@@ -243,13 +246,19 @@ def stormwater_features(session: requests.Session, layer: str, bounds: tuple[flo
 def fetch_stormwater(folder: Path, session: requests.Session | None = None) -> dict[str, Any]:
     session = session or requests.Session()
     services = arcgis_json(session, STORMWATER_PUBLISHER["services"]).get("services") or []
-    scenarios = []
+    scenarios, failed = [], []
     for scenario in STORMWATER_SCENARIOS:
         layer = stormwater_layer(session, scenario["match"], services)
         if layer is None:
             print(f"      stormwater {scenario['key']}: not published by {STORMWATER_PUBLISHER['account']}")
             continue
-        features = stormwater_features(session, layer, NEIGHBORHOOD["bounds"])
+        # One failing layer should not throw away the others.
+        try:
+            features = stormwater_features(session, layer, NEIGHBORHOOD["bounds"], scenario["key"])
+        except Exception as error:
+            failed.append({"key": scenario["key"], "error": f"{type(error).__name__}: {error}"[:300]})
+            print(f"      stormwater {scenario['key']}: FAILED, {failed[-1]['error']}")
+            continue
         scenarios.append(
             {key: value for key, value in scenario.items() if key != "match"}
             | {"dataset": STORMWATER_DATASET, "layer": layer, "features": features}
@@ -257,7 +266,8 @@ def fetch_stormwater(folder: Path, session: requests.Session | None = None) -> d
         print(f"      stormwater {scenario['key']}: {len(features)} flooding categories in the neighborhood ({layer})")
     if not scenarios:
         names = ", ".join(service.get("name", "?") for service in services) or "none"
-        raise RuntimeError(f"no flood map scenario found; {STORMWATER_PUBLISHER['account']} publishes: {names}"[:450])
+        reason = "; ".join(item["error"] for item in failed) or f"{STORMWATER_PUBLISHER['account']} publishes: {names}"
+        raise RuntimeError(f"no flood map scenario saved; {reason}"[:450])
     return {
         "name": "stormwater",
         "dataset": STORMWATER_DATASET,
@@ -265,6 +275,7 @@ def fetch_stormwater(folder: Path, session: requests.Session | None = None) -> d
         "bounds": NEIGHBORHOOD["bounds"],
         "retrieved_at": times.now().isoformat(),
         "scenarios": scenarios,
+        "failed": failed,
     }
 
 
@@ -318,8 +329,9 @@ def run(only: list[str] | None, folder: Path = SNAPSHOT_DIR, client: Socrata | N
         try:
             payload = fetch_stormwater(folder)
             save(folder, "stormwater", payload)
-            entries["stormwater"] = {"ok": True, "dataset": payload["dataset"], "scenarios": len(payload["scenarios"]), "retrieved_at": payload["retrieved_at"]}
-            print(f"OK    stormwater: {len(payload['scenarios'])} flood map scenarios")
+            entries["stormwater"] = {"ok": True, "dataset": payload["dataset"], "scenarios": len(payload["scenarios"]), "failed": payload["failed"], "retrieved_at": payload["retrieved_at"]}
+            missing = f" ({len(payload['failed'])} failed, see above)" if payload["failed"] else ""
+            print(f"OK    stormwater: {len(payload['scenarios'])} flood map scenarios saved{missing}")
         except Exception as error:
             entries["stormwater"] = {"ok": False, "error": f"{type(error).__name__}: {error}"[:500]}
             print(f"FAIL  stormwater: {entries['stormwater']['error']}")

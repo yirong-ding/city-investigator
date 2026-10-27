@@ -222,8 +222,8 @@ def test_muse_spark_verifies_the_photo_with_sam(sidewalk_result, store, monkeypa
     assert "0.75" in explanation["evidence"]["photo:street_sign"]["summary"]
     assert len(explanation["models_disagree"]) == 1 and "no storm drain" in explanation["models_disagree"][0]
     report = ex.render(explanation)
-    assert "- check_photo(street sign): SAM 3.1 found street sign" in report
-    assert "- get_record(311:1002): read" in report
+    assert "- check_photo(concept=street sign): SAM 3.1 found street sign" in report
+    assert "- get_record(evidence_id=311:1002): read" in report
 
 
 def test_photo_checks_are_capped(sidewalk_result):

@@ -499,3 +499,21 @@ def test_flood_map_without_a_category_field_is_reported():
     fields = ["FID", "Flooding_C", "OBJECTID", "Shape_Area", "Shape_Leng", "Shape__Area", "Shape__Length"]
     assert snapshot.flood_category(dict.fromkeys(fields, 7) | {"Flooding_C": 2}) == 2  # the climate office's layers
     assert snapshot.flood_category({"Flooding_Category": None}) is None
+
+
+def test_one_failing_flood_layer_does_not_lose_the_others(tmp_path, capsys):
+    class BrokenExtreme(FloodMapServer):
+        def get(self, url, params=None, timeout=None):
+            if "Extreme" in url and url.endswith("/query"):
+                raise TimeoutError("read timed out")
+            return super().get(url, params, timeout)
+
+    server = BrokenExtreme({
+        "Moderate_Flood_Map_Current_Sea_Levels": [feature(2, square(*CORNER, 10))],
+        "NYC_Stormwater_Flood_Map___Extreme_Flood_with_2080_Sea_Level_Rise": [feature(3, square(*CORNER, 40))],
+    })
+    payload = snapshot.fetch_stormwater(tmp_path, server)
+    assert [scenario["key"] for scenario in payload["scenarios"]] == ["moderate_current"]
+    assert payload["failed"] == [{"key": "extreme_2080", "error": "TimeoutError: read timed out"}]
+    out = capsys.readouterr().out
+    assert "stormwater moderate_current: 1 map features read" in out and "extreme_2080: FAILED" in out

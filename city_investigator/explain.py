@@ -77,6 +77,7 @@ CONCEPT_WORDS = {
     "water": ("water", "flooded"),
     "puddle": ("puddle",),
     "catch basin": ("catch basin", "drain", "sewer grate", "storm grate"),
+    "storm drain": ("catch basin", "drain", "sewer grate", "storm grate"),
     "scaffolding": ("scaffold", "sidewalk shed"),
     "construction fence": ("fence",),
     "construction barrier": ("barrier", "barricade"),
@@ -102,7 +103,7 @@ Rules:
 - Start with one or two claims that answer the question directly.
 - Mention every flag, citing its flag id together with the evidence behind it.
 - A permit shows authorization, not that a structure is physically up. Complaints show that someone \
-reported, not how bad a problem was. A sensor measures one spot. A flood model shows where water is expected \
+reported (anyone can file one, so do not say who), not how bad a problem was. A sensor measures one spot. A flood model shows where water is expected \
 to pond in a design storm, not what happened on any day.
 - If the photo was taken at a different time than the question asks about, it shows the place, not that moment.
 - Say nothing about who owns or runs a building, and do not assign blame. Do not describe people in the photo.
@@ -774,7 +775,7 @@ def render(explanation: dict[str, Any]) -> str:
         lines += ["", "## What Muse Spark checked", ""]
         for call in explanation["tool_calls"]:
             args = call["arguments"]
-            shown = ", ".join(f"{value}" for value in args.values()) if isinstance(args, dict) else args
+            shown = ", ".join(f"{key}={value}" for key, value in args.items()) if isinstance(args, dict) else args
             lines.append(f"- {call['tool']}({shown}): {call['outcome']}")
     lines += ["", "## Sources", ""]
     for eid, item in explanation["evidence"].items():

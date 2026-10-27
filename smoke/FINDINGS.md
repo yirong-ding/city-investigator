@@ -208,3 +208,9 @@ Third and fourth runs, with the tools (hosted Muse Spark 1.3, about 41 to 45 s a
 - The current collection, 9i7c-xyvv (`NYCFloodStormwaterFloodMaps.zip`, updated 2024-07-03, four scenarios including a new "Limited Flood, 1.77 in/hr"), holds **Esri compressed file geodatabases (CDF)**. GDAL's open-source OpenFileGDB driver cannot read them.
 - ArcGIS Online has many copies. The one web search found (organization `IsDCghZ73NgoYoz5`) is a university teaching account, not a city source. The city's copy is published by the account **`mocej.nyc.data`** (NYC Mayor's Office of Climate and Environmental Justice, which makes the maps).
 - **Decision:** the snapshot lists the climate office's ArcGIS services, picks each scenario by name, and asks only for the part inside the neighborhood. Evidence cites the Open Data collection page.
+
+Flood demo rerun with the tools (Carroll St/4th Av, hosted Muse Spark 1.3, about $0.07): 11 of 11 claims passed, 5 lookups.
+
+- **Muse Spark settled the "street drains" disagreement itself.** It asked SAM 3.1 for "storm drain" and SAM found 5 regions (best 0.89), where our fixed prompt "catch basin" had found nothing. The flooding prompts now use "storm drain".
+- It read the 311 resolutions: debris blocking the catch basin, and "surcharge" from heavy rain for the backup.
+- The flood maps were missing ("not loaded"): the snapshot read the moderate layers but saved nothing because the extreme 2080 layer did not finish. Each layer now saves on its own, with progress printed per page.

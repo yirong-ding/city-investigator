@@ -41,7 +41,8 @@ from city_investigator.store import Coverage, Hit, LookupResult, Store, overlaps
 OUTPUT = ROOT / "data" / "private" / "investigations"
 CONCEPTS = {
     "sidewalk": ["scaffolding", "construction fence", "construction barrier"],
-    "flooding": ["water", "puddle", "catch basin"],
+    # "storm drain" finds street drains that "catch basin" misses (SAM 3.1, Carroll St/4th Av photo).
+    "flooding": ["water", "puddle", "storm drain"],
 }
 PRIVACY_CONCEPTS = ["face", "license plate"]
 RADIUS_M = {"sidewalk": 50, "flooding": 150}

@@ -484,4 +484,6 @@ def test_flood_map_without_a_category_field_is_reported():
     with pytest.raises(RuntimeError, match="no flooding category field; fields: \\['DEPTH', 'OBJECTID'\\]"):
         snapshot.flood_category({"OBJECTID": 1, "DEPTH": 2})
     assert snapshot.flood_category({"flooding_category": "1-Nuisance Flooding"}) == 1
+    fields = ["FID", "Flooding_C", "OBJECTID", "Shape_Area", "Shape_Leng", "Shape__Area", "Shape__Length"]
+    assert snapshot.flood_category(dict.fromkeys(fields, 7) | {"Flooding_C": 2}) == 2  # the climate office's layers
     assert snapshot.flood_category({"Flooding_Category": None}) is None

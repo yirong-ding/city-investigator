@@ -194,7 +194,8 @@ def stormwater_layer(session: requests.Session, words: tuple[str, ...], services
 
 
 def flood_category(properties: dict[str, Any]) -> int | None:
-    key = next((key for key in properties if "categ" in key.lower()), None)
+    # "Flooding_Category", or "Flooding_C" where the layer came from a shapefile (10-character names).
+    key = next((key for key in properties if "categ" in key.lower() or key.lower().startswith("flooding_c")), None)
     if key is None:
         raise RuntimeError(f"no flooding category field; fields: {sorted(properties)}")
     found = re.match(r"\s*(\d+)", str(properties[key]))

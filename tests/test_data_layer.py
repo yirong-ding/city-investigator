@@ -561,7 +561,7 @@ def test_probe_lists_complaints_and_datasets(monkeypatch, tmp_path, capsys):
 
     monkeypatch.setattr(probe.requests, "Session", Session)
     monkeypatch.setattr(probe, "DERIVED_DIR", tmp_path)
-    probe.main()
+    probe.main([])
     out = capsys.readouterr().out
     assert "41  DPR  Damaged Tree | Branch or Limb Has Fallen Down" in out and "Noise" not in out
     assert "hn5i-inap  Forestry Tree Points  (updated 2026-10-01)" in out

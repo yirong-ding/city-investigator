@@ -179,7 +179,11 @@ def scrub(row: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in row.items() if key not in DROPPED_FIELDS}
 
 
-def fetch_step(client: Socrata, step: Step, done: dict[str, list[dict[str, Any]]]) -> tuple[str, list[dict[str, Any]]]:
+def fetch_step(
+    client: Socrata, step: Step, done: dict[str, list[dict[str, Any]]], tried: list[str] | None = None,
+) -> tuple[str, list[dict[str, Any]]]:
+    """The rows of the first where clause that keeps any; tried, if given, gets one line per clause."""
+    tried = [] if tried is None else tried
     wheres = step.wheres(done)
     if any("IN ()" in where for where in wheres):
         raise RuntimeError("nothing to query: an earlier step it depends on returned no rows")
@@ -192,8 +196,10 @@ def fetch_step(client: Socrata, step: Step, done: dict[str, list[dict[str, Any]]
             last_error = error
             if error.status not in (400, 414):  # only a malformed or too long query is worth a fallback
                 raise
+            tried.append(f"{shorten(where)}: refused (HTTP {error.status})")
             continue
         kept = [scrub(row) for row in rows if step.keep(row, done)]
+        tried.append(f"{shorten(where)}: {len(rows)} matched, {len(kept)} kept")
         if kept:
             return where, kept
         # A valid clause can match nothing when the city writes the value another way: try the next.
@@ -201,6 +207,10 @@ def fetch_step(client: Socrata, step: Step, done: dict[str, list[dict[str, Any]]
     if empty:
         return empty
     raise last_error or RuntimeError("no query to run")
+
+
+def shorten(where: str, limit: int = 110) -> str:
+    return where if len(where) <= limit else where[: limit - 1] + "…"
 
 
 def fetch_rainfall(start_year: int, session: requests.Session | None = None) -> list[dict[str, Any]]:
@@ -377,8 +387,9 @@ def run(only: list[str] | None, folder: Path = SNAPSHOT_DIR, client: Socrata | N
         if only and step.name not in only:
             continue
         started = time.monotonic()
+        tried: list[str] = []
         try:
-            where, rows = fetch_step(client, step, done)
+            where, rows = fetch_step(client, step, done, tried)
         except Exception as error:  # report and continue with the other datasets
             entries[step.name] = {"ok": False, "error": f"{type(error).__name__}: {error}"[:500]}
             print(f"FAIL  {step.name}: {entries[step.name]['error']}")
@@ -388,6 +399,8 @@ def run(only: list[str] | None, folder: Path = SNAPSHOT_DIR, client: Socrata | N
         save(folder, step.name, {"name": step.name, "dataset": step.dataset, "where": where, "retrieved_at": retrieved, "rows": rows})
         entries[step.name] = {"ok": True, "dataset": step.dataset, "rows": len(rows), "retrieved_at": retrieved}
         print(f"OK    {step.name}: {len(rows)} rows ({time.monotonic() - started:.0f}s)")
+        if not rows:  # say which query matched what, so the selection can be fixed
+            print("\n".join(f"        {line}" for line in tried))
     if not only or "rainfall" in only:
         try:
             rows = fetch_rainfall(RAIN_START_YEAR)

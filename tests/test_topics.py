@@ -288,3 +288,52 @@ def test_the_page_lists_topics_and_groups_new_records():
     assert web.group({"id": "dining_licenses:x", "category": "dining_license"}) == "permit"
     assert web.group({"id": "tree_points:T1", "category": "tree_inventory"}) == "inventory"
     assert web.group({"id": "311:1", "category": "pothole"}) == "complaint"
+
+
+def test_a_snapshot_that_finds_nothing_says_what_each_query_matched():
+    step = next(step for step in snapshot.plan() if step.name == "sidewalk_violations")
+    done = {"pluto": [{"bbl": "3004560012.00000000", "latitude": str(LAT), "longitude": str(LON)}]}
+    tried = []
+
+    class Elsewhere:
+        def rows(self, dataset, where):
+            if "306 BROOKLYN" in where:
+                raise SocrataError("type mismatch", 400)
+            return [{"violationid": "V2", "bblid": "1000010001"}] if where.startswith("cb = '6' ") else []
+
+    where, rows = snapshot.fetch_step(Elsewhere(), step, done, tried)
+    assert rows == [] and "refused (HTTP 400)" in tried[2] and "1 matched, 0 kept" in tried[4]
+
+
+class Portal:
+    """Answers the probe's questions about the sidewalk violations dataset."""
+
+    def __init__(self):
+        self.session = self
+
+    def json(self):
+        return {"columns": [{"fieldName": "cb", "dataTypeName": "number"}, {"fieldName": "bblid", "dataTypeName": "text"}]}
+
+    def get(self, dataset, params=None, timeout=None):
+        if params is None:  # the column types
+            return self
+        where = params.get("$where", "")
+        if "$group" in params:
+            return [{"cb": "6", "n": "900"}, {"cb": "1", "n": "800"}]
+        if "'306" in where:
+            raise SocrataError("type mismatch", 400)
+        matching = [{"bblid": "3-00456-0012", "cb": "6"}] if where.startswith("cb = 6 ") else []
+        if params.get("$select") == "count(*) AS n":
+            return [{"n": str(len(matching))}]
+        return matching if where else [{"cb": "6", "bblid": "3-00456-0012", "vissuedate": "2024-01-01"}]
+
+
+def test_probe_look_shows_types_values_and_what_each_query_keeps():
+    from city_investigator import probe
+
+    district = snapshot.district({"pluto": [{"bbl": LOT, "latitude": str(LAT), "longitude": str(LON)}]})
+    text = "\n".join(probe.look(Portal(), "sidewalk_violations", district))
+    assert "cb=number" in text and "bblid=text" in text and "'6' (900)" in text
+    assert "refused (HTTP 400)" in text
+    assert "cb = 6 AND vissuedate >= '2015-01-01T00:00:00': 1 rows; of 1 read, 0 in the district" in text
+    assert "e.g. cb='6'; bblid='3-00456-0012'" in text  # the lot is written with dashes

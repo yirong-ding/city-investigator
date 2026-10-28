@@ -9,21 +9,30 @@ Prints, for Brooklyn Community District 6:
 Writes the full lists to data/derived/probe.json. Nothing is downloaded beyond counts and
 the catalog.
 
+With --look, it instead shows how a snapshot source's dataset writes the columns it is
+selected and placed by: their types, three recent rows, the most common values of the
+first, and for each where clause the snapshot would try, how many rows match and how many
+of those land in the district. Nothing is saved.
+
 Usage:
   python -m city_investigator.probe
+  python -m city_investigator.probe --look street_permits --look sidewalk_violations
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 from typing import Any
 
 import requests
 
+from city_investigator import snapshot
 from city_investigator.config import DATASETS, NEIGHBORHOOD
-from city_investigator.settings import DERIVED_DIR, load_env
-from city_investigator.socrata import BASE
+from city_investigator.settings import DERIVED_DIR, SNAPSHOT_DIR, load_env
+from city_investigator.socrata import BASE, Socrata, SocrataError
+from city_investigator.sources import SOURCES, District
 
 CATALOG = "https://api.us.socrata.com/api/catalog/v1"
 # Words that mark a 311 complaint as possibly belonging to one of the new topics.
@@ -42,6 +51,14 @@ SEARCHES = {
     "street construction": ["Street Construction Permits", "street closures construction"],
     "outdoor dining": ["Dining Out NYC", "Open Restaurant Applications", "sidewalk cafe"],
 }
+
+# The columns each source is selected and placed by; the first is grouped to show its values.
+LOOK = {
+    "sidewalk_violations": ("cb", "bblid", "vissuedate", "house_num", "onstname"),
+    "tree_sidewalk_damage": ("cb", "bblid", "atdissuedate", "house_num", "onstname"),
+    "street_permits": ("boroughname", "onstreetname", "issuedworkenddate", "locationgeometry", "wkt"),
+}
+VIEWS = "https://data.cityofnewyork.us/api/views"
 
 
 def complaint_counts(session: requests.Session) -> list[dict[str, Any]]:
@@ -85,8 +102,64 @@ def relevant(row: dict[str, Any]) -> bool:
     return any(word in text for word in TOPIC_WORDS)
 
 
-def main() -> None:
+def describe(row: dict[str, Any], columns: tuple[str, ...]) -> str:
+    return "; ".join(f"{column}={str(row.get(column))[:100]!r}" for column in columns)
+
+
+def look(client: Socrata, name: str, district: District) -> list[str]:
+    """Lines showing how a source's dataset writes its columns and what each where clause finds."""
+    source = SOURCES[name]
+    columns = LOOK.get(name, ())
+    lines = [f"{name} ({source.dataset})"]
+    try:
+        response = client.session.get(f"{VIEWS}/{source.dataset}.json", timeout=60)
+        types = {column.get("fieldName"): column.get("dataTypeName") for column in response.json().get("columns", [])}
+        lines.append("  types: " + ", ".join(f"{column}={types.get(column, 'missing')}" for column in columns))
+    except (requests.RequestException, ValueError, AttributeError) as error:
+        lines.append(f"  types: unavailable ({error})")
+    try:
+        lines += [f"  recent: {describe(row, columns)}" for row in client.get(source.dataset, {"$limit": 3, "$order": ":id DESC"})]
+        if columns:
+            first = columns[0]
+            common = client.get(source.dataset, {"$select": f"{first}, count(*) AS n", "$group": first, "$order": "n DESC", "$limit": 12})
+            lines.append(f"  most common {first}: " + ", ".join(f"{row.get(first)!r} ({row.get('n')})" for row in common))
+    except SocrataError as error:
+        lines.append(f"  could not read rows: {error}")
+    for where in source.where(district):
+        label = f"  {snapshot.shorten(where, 90)}"
+        try:
+            count = int(client.get(source.dataset, {"$select": "count(*) AS n", "$where": where})[0]["n"])
+            rows = client.get(source.dataset, {"$where": where, "$limit": 1000}) if count else []
+        except SocrataError as error:
+            lines.append(f"{label}: refused (HTTP {error.status})")
+            continue
+        kept = [row for row in rows if source.keep(row, district)]
+        found = f"{label}: {count} rows" + (f"; of {len(rows)} read, {len(kept)} in the district" if rows else "")
+        lines.append(found + (f"\n      e.g. {describe(rows[0], columns)}" if rows and not kept else ""))
+    return lines
+
+
+def look_main(names: list[str]) -> None:
+    pluto = SNAPSHOT_DIR / "pluto.json"
+    done = {"pluto": json.loads(pluto.read_text())["rows"]} if pluto.is_file() else {}
+    district = snapshot.district(done)
+    print(f"District: {len(district.lots)} lots, {len(district.streets)} streets, box {tuple(round(v, 4) for v in district.box)}")
+    client = Socrata()
+    for name in names:
+        if name not in SOURCES:
+            print(f"\n{name}: not a source; choose from {', '.join(SOURCES)}")
+            continue
+        print("\n" + "\n".join(look(client, name, district)))
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--look", action="append", help="a snapshot source to inspect; repeatable")
+    args = parser.parse_args(argv)
     load_env()
+    if args.look:
+        look_main(args.look)
+        return
     session = requests.Session()
     if os.environ.get("SOCRATA_APP_TOKEN"):
         session.headers["X-App-Token"] = os.environ["SOCRATA_APP_TOKEN"]

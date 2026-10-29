@@ -286,6 +286,8 @@ def test_new_topic_checks():
 
     complaints = [record(f"311:{n}", "pothole", "potholes", WHEN - timedelta(days=10 * n)) for n in (1, 2, 3)]
     assert types(topic_checks("potholes", [], complaints, WHEN)) == ["reported_not_seen", "repeat_reports"]
+    answered = [record(f"311:{n}", "pothole", "potholes", WHEN - timedelta(days=10 * n), WHEN - timedelta(days=5)) for n in (1, 2, 3)]
+    assert types(topic_checks("potholes", [], answered, WHEN)) == ["closed_and_not_seen", "repeat_reports"]  # closed, then gone
     assert types(topic_checks("potholes", [pothole], complaints, WHEN))[0] == "reported_and_seen"
 
     structure = seen("outdoor dining structure", "outdoor_dining")
@@ -298,12 +300,16 @@ def test_new_topic_checks():
     unsafe = record("facade_filings:1", "facade_filing", "facades", WHEN - timedelta(days=400), raw={"filing_status": "UNSAFE"},
                     address="1 TEST STREET", bbl=LOT)
     assert types(topic_checks("facades", [seen("scaffolding", "facades")], [unsafe], WHEN))[-1] == "facade_unsafe_protected"
-    assert types(topic_checks("facades", [], [unsafe], WHEN)) == ["facade_unsafe_unprotected"]
+    assert types(topic_checks("facades", [], [unsafe], WHEN, {unsafe.id: 10})) == ["facade_unsafe_unprotected"]
+    assert topic_checks("facades", [], [unsafe], WHEN, {unsafe.id: 35}) == []  # too far to be sure it is in the frame
+    # Scaffolding protects the public; seeing it is not a façade problem nobody reported.
+    assert "seen_not_reported" not in types(topic_checks("facades", [seen("scaffolding", "facades")], [], WHEN))
+    assert topic_checks("potholes", [seen("cracked asphalt", "potholes")], [], WHEN) == []  # most streets have cracks
     safe_later = record("facade_filings:2", "facade_filing", "facades", WHEN - timedelta(days=30), raw={"filing_status": "SAFE"}, bbl=LOT)
     assert topic_checks("facades", [], [unsafe, safe_later], WHEN) == []  # the latest filing counts
 
     tree = record("tree_points:T1", "tree_inventory", "trees", raw={"tpstructure": "Full"})
-    gone = record("tree_points:T0", "tree_inventory", "trees", raw={"tpstructure": "Retired"})
+    gone = record("tree_points:T0", "tree_inventory", "trees", raw={"tpstructure": "Retired", "updateddate": "2019-03-05T00:00:00.000"})
     assert types(topic_checks("trees", [seen("tree", "trees")], [tree], WHEN, {tree.id: 5})) == ["inventory_tree_nearby"]
     assert topic_checks("trees", [seen("tree", "trees")], [tree], WHEN, {tree.id: 20}) == []
     # A removed tree's record is never taken for the tree in the photo.
@@ -450,7 +456,10 @@ def test_batch_investigates_shortlisted_sites_once_and_adds_them_up(store, tmp_p
     shortlist = {
         "sheds": [],
         "flood_corners": [{"sensor": "Test St/Example Av", "lat": LAT, "lon": LON, "photos": []}],  # no photo: skipped
-        "topics": {"potholes": [{"address": "1 TEST STREET", "lat": LAT, "lon": LON, "photos": [{"id": "123"}]}]},
+        "topics": {"potholes": [
+            {"address": "1 TEST STREET", "lat": LAT, "lon": LON, "photos": [{"id": "999", "faces_site": False}, {"id": "123"}]},
+            {"address": "2 TEST STREET", "lat": LAT, "lon": LON, "photos": [{"id": "998", "faces_site": False}]},  # cannot show it
+        ]},
     }
     jobs = batch.plan(shortlist, None, 5)
     assert [(job["topic"], job["place"], job["photo_id"]) for job in jobs] == [("potholes", "1 TEST STREET", "123")]
@@ -461,7 +470,7 @@ def test_batch_investigates_shortlisted_sites_once_and_adds_them_up(store, tmp_p
     saved = json.loads((folder / "batch.json").read_text())
     totals = saved["summary"]
     assert totals["sites"] == 1 and totals["claims_kept_share"] == 1.0 and totals["lookups"] == {"check_photo": 1}
-    assert totals["sites_with_a_conflict_or_gap"] == 1
+    assert totals["sites_records_and_photo_disagree"] == 1 and totals["sites_reported_again_and_again"] == 0
     point = json.loads((folder / "batch.geojson").read_text())["features"][0]
     assert point["geometry"]["coordinates"] == [LON, LAT] and point["properties"]["worst"] in ("conflict", "gap")
     text = (folder / "batch.md").read_text()
@@ -469,3 +478,11 @@ def test_batch_investigates_shortlisted_sites_once_and_adds_them_up(store, tmp_p
 
     asyncio.run(batch.run(jobs, loaded, "meta", True, folder))  # a second run pays for nothing already done
     assert fetched == ["123"]
+
+
+def test_a_tree_removed_after_the_photo_was_standing_when_it_was_taken():
+    later = record("tree_points:T2", "tree_inventory", "trees", raw={"tpstructure": "Stump", "updateddate": "2026-08-03T00:00:00.000"})
+    [flag] = topic_checks("trees", [seen("tree", "trees")], [later], WHEN, {later.id: 4})
+    assert flag.type == "inventory_tree_nearby" and "since recorded it as removed (2026-08-03)" in flag.message
+    earlier = record("tree_points:T3", "tree_inventory", "trees", raw={"tpstructure": "Stump", "updateddate": "2024-08-03T00:00:00.000"})
+    assert types(topic_checks("trees", [seen("tree", "trees")], [earlier], WHEN, {earlier.id: 4})) == ["removed_tree_listed"]

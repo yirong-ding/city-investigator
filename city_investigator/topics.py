@@ -22,7 +22,7 @@ class Topic:
     example: str  # an example question
     words: tuple[str, ...]  # word starts that point to this topic in a question
     concepts: tuple[str, ...]  # what SAM 3.1 looks for
-    problems: tuple[str, ...]  # the concepts whose presence means the problem is visible
+    problems: tuple[str, ...]  # the concepts whose presence means the problem is visible; none: the photo cannot show it
     radius_m: float
     lookback_days: int | None  # None: the topic gathers its records its own way
     related: frozenset[str] = field(default_factory=frozenset)
@@ -53,7 +53,8 @@ TOPICS: dict[str, Topic] = {
         Topic(
             "facades", "Unsafe façades", "façade", "Is this building's façade unsafe?",
             ("facade", "façade", "falling", "debris", "brick", "cornice", "netting", "local law 11"),
-            ("scaffolding", "safety netting"), ("scaffolding", "safety netting"), 40, 10 * 365,
+            # Scaffolding and netting protect the public from a façade; they are not the problem itself.
+            ("scaffolding", "safety netting"), (), 40, 10 * 365,
             frozenset({"shed_permit", "scaffold_permit", "shed_complaint"}),
         ),
         Topic(
@@ -70,7 +71,8 @@ TOPICS: dict[str, Topic] = {
         Topic(
             "potholes", "Potholes and road damage", "pothole and road", "Was this pothole ever fixed?",
             ("pothole", "road", "asphalt", "cave-in", "cave in", "street damage"),
-            ("pothole", "cracked asphalt", "manhole cover"), ("pothole", "cracked asphalt"), 40, 365,
+            # Most streets show some cracked asphalt, so only a pothole counts as the problem.
+            ("pothole", "cracked asphalt", "manhole cover"), ("pothole",), 40, 365,
         ),
         Topic(
             "street_construction", "Street construction", "street construction", "Is this street construction permitted?",

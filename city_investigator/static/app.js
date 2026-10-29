@@ -634,7 +634,7 @@ async function showOverview() {
   const share = summary.claims_kept_share === null ? '-' : `${Math.round(summary.claims_kept_share * 100)}%`;
   $('overview-stats').replaceChildren(
     stat(summary.sites, 'places investigated'),
-    stat(summary.sites_with_a_conflict_or_gap, 'with a conflict or a gap'),
+    stat(summary.sites_records_and_photo_disagree ?? '-', 'where the records and the photo disagree'),
     stat(share, `of ${summary.claims_kept + summary.claims_removed} claims kept after checking`),
     stat(summary.lookups.check_photo || 0, 'times Muse Spark asked SAM 3.1 to look again'));
   const order = Object.keys(WORST);

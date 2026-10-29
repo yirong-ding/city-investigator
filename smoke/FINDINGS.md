@@ -249,3 +249,15 @@ Placement check (`python -m smoke.placements`): no sidewalk record came from ano
 - Muse Spark looked things up 103 times on its own: 75 record reads, 10 building lookups, 6 searches, and **12 times it asked SAM 3.1 to look again** for something new ("sidewalk shed", "orange traffic barrel", "parked car along curb"). Its reading and SAM 3.1 never disagreed.
 - Harmless "Exception ignored ... async generator already executing" messages appeared after some SAM look-agains: half-read response streams were closed later by the garbage collector from another thread's loop. SAM streams are now read to the end, and the batch runs explanations the way the single command does.
 - The page has a **District overview**: every batch place on the map, colored by its worst flag, each opening its full investigation.
+
+Audit of the batch's 24 conflict and gap flags, by hand:
+
+- **Held up (13):** both repeat-report patterns and record gaps (9 `repeat_reports`, the 180 Kane permit-chain gap), the Carroll St/4th Av flood pair (a nor'easter on April 3 to 4, 2024: 311 reports, no sensor reading, Central Park's wettest hour 0.25 in), 431 Hicks (shed permit valid, photo 12 m away facing it, no shed), 433 Dean (structure seen, no permit in 2018).
+- **Rules fixed (6):**
+  - 180 Kane `permit_without_structure`: every photo there faced away. The batch now skips photos that face away.
+  - 473 14 St `removed_tree_listed`: the stump record was updated in 2026, years after the 2019 photo. Removal now counts only if recorded before the photo; a tree removed later is matched as the photo's tree, with "since recorded as removed".
+  - 500 4 Av and 90 8 Av `seen_not_reported`: scaffolding protects the public; it is not a façade problem nobody reported. Façades now have no photo-visible problem; their filings carry the topic.
+  - 81 Ferris `closed_but_still_seen`: fired on "cracked asphalt", which most streets show. Only a pothole counts now.
+  - 515 6 St `facade_unsafe_unprotected`: the UNSAFE filing was for 501 6 St, about 30 m off. It now needs the building within 20 m of the pin.
+- **Reworded (4 `reported_not_seen`):** complaints closed before the photo and nothing visible now read as agreement ("consistent with a repair"); only complaints still open on the photo's date are a conflict.
+- The summary now counts places by kind (records and photo disagree; reported again and again; other gaps; agree) instead of one "conflict or gap" number that mixed patterns with mismatches.

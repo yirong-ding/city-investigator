@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 
+from city_investigator import times
 from city_investigator.evidence import Evidence, day
 from city_investigator.sheds import ShedChain, days_between
 from city_investigator.sources import yes
@@ -241,6 +242,8 @@ def topic_checks(
     days = sorted({day(item.start) for item in complaints})
     where = f"within {spec.radius_m:.0f} m"
 
+    if not spec.problems:  # the photo cannot show this topic's problem, so it neither confirms nor contradicts reports
+        seen, around, before = [], [], []
     if seen and around:
         flags.append(Flag(
             "reported_and_seen", AGREEMENT,
@@ -255,11 +258,20 @@ def topic_checks(
             f"{spec.lookback_days // 365 or 1} year(s) before the photo. That is a gap in reporting, not proof it does not matter.",
             ids(seen),
         ))
-    if before and not seen:
+    still_open = [item for item in before if not item.end or item.end > when]
+    if still_open and not seen:
         flags.append(Flag(
             "reported_not_seen", CONFLICT,
-            f"{len(before)} 311 complaint(s) in the 90 days before the photo describe a {spec.noun} problem {where}, "
-            "but SAM 3.1 found none in the photo. It may have been fixed, be out of frame, or be missed by the model.",
+            f"{len(still_open)} 311 complaint(s) filed in the 90 days before the photo and still open on its date describe a "
+            f"{spec.noun} problem {where}, but SAM 3.1 found none in the photo. It may have been fixed, be out of frame, "
+            "or be missed by the model.",
+            ids(still_open),
+        ))
+    elif before and not seen:
+        flags.append(Flag(
+            "closed_and_not_seen", AGREEMENT,
+            f"{len(before)} 311 complaint(s) {where} in the 90 days before the photo were closed by its date, and SAM 3.1 "
+            "finds no such problem in the photo: consistent with a repair, though it may also be out of frame.",
             ids(before),
         ))
     closed = [
@@ -287,7 +299,7 @@ def topic_checks(
     if topic == "facades":
         flags += facade_checks(observations, records, when, distances)
     if topic == "trees":
-        flags += tree_checks(observations, records, distances)
+        flags += tree_checks(observations, records, distances, when)
     if topic == "curb_ramps":
         flags += ramp_checks(seen, records, distances)
     return flags
@@ -341,7 +353,7 @@ def facade_checks(
                 "consistent with what the photo shows.",
                 ids(protection) + [filing.id],
             ))
-        else:
+        elif distances.get(filing.id, IN_VIEW_M + 1) <= IN_VIEW_M:  # farther away, the building may be out of frame
             flags.append(Flag(
                 "facade_unsafe_unprotected", CONFLICT,
                 f"The latest façade filing for {place} ({day(filing.start)}) is UNSAFE. {rule}, but none is visible. "
@@ -351,11 +363,14 @@ def facade_checks(
     return flags
 
 
-def tree_checks(observations: list[Evidence], records: list[Evidence], distances: dict[str, float]) -> list[Flag]:
-    """Match a tree in the photo to the inventory: the nearest standing tree within a few meters.
+def tree_checks(
+    observations: list[Evidence], records: list[Evidence], distances: dict[str, float], when: datetime | None = None
+) -> list[Flag]:
+    """Match a tree in the photo to the inventory: the nearest tree standing on the photo's date, within a few meters.
 
-    A removed tree's record (structure Retired or Stump) can be the nearest; it is named so it
-    is not taken for the tree in the photo.
+    The inventory holds each tree's latest state. A record marked removed (structure Retired or
+    Stump) after the photo was a standing tree when the photo was taken; one marked removed
+    before it is named, so it is not taken for the tree in the photo.
     """
     trees = [item for item in observations if item.category.startswith("seen_") and "tree" in item.category]
     inventory = sorted(
@@ -364,8 +379,18 @@ def tree_checks(observations: list[Evidence], records: list[Evidence], distances
     )
     if not trees or not inventory:
         return []
-    standing = [item for item in inventory if str(item.raw.get("tpstructure") or "").strip().lower() not in REMOVED_TREE]
-    removed = [item for item in inventory if item not in standing and (not standing or distances[item.id] < distances[standing[0].id])]
+    def removed(item: Evidence) -> bool:
+        return str(item.raw.get("tpstructure") or "").strip().lower() in REMOVED_TREE
+
+    def updated(item: Evidence) -> datetime | None:
+        return times.parse(item.raw.get("updateddate") or item.raw.get("createddate"))
+
+    def removed_by_photo(item: Evidence) -> bool:
+        changed = updated(item)
+        return removed(item) and (when is None or changed is None or changed <= when)
+
+    standing = [item for item in inventory if not removed_by_photo(item)]
+    gone = [item for item in inventory if item not in standing and (not standing or distances[item.id] < distances[standing[0].id])]
 
     def described(item: Evidence) -> str:
         return f"{distances[item.id]:.0f} m away: {item.summary.removeprefix('Street tree in the Parks inventory: ')}"
@@ -373,18 +398,22 @@ def tree_checks(observations: list[Evidence], records: list[Evidence], distances
     if not standing:
         return [Flag(
             "removed_tree_listed", CONFLICT,
-            f"A tree is seen, but the only Parks inventory records within {TREE_MATCH_M} m are of removed trees "
-            f"(nearest {described(removed[0])}). The tree in the photo may be a newer planting the inventory does not "
+            f"A tree is seen, but the only Parks inventory records within {TREE_MATCH_M} m are of trees removed before the photo "
+            f"(nearest {described(gone[0])}). The tree in the photo may be a newer planting the inventory does not "
             "list, or one farther away.",
-            ids(trees) + [removed[0].id],
+            ids(trees) + [gone[0].id],
         )]
     nearest = standing[0]
-    closer = f" A removed tree's record is closer, {described(removed[0])}." if removed else ""
+    closer = f" A removed tree's record is closer, {described(gone[0])}." if gone else ""
+    since = (
+        f" Parks has since recorded it as removed ({day(updated(nearest))}), so it may have come down after the photo."
+        if removed(nearest) else ""
+    )
     return [Flag(
         "inventory_tree_nearby", AGREEMENT,
-        f"The Parks inventory lists a standing tree {described(nearest)}. It is likely the tree in the photo; "
-        f"the photo's direction was not checked.{closer}",
-        ids(trees) + [nearest.id] + ([removed[0].id] if removed else []),
+        f"The Parks inventory lists a tree standing on the photo's date {described(nearest)}. It is likely the tree in "
+        f"the photo; the photo's direction was not checked.{since}{closer}",
+        ids(trees) + [nearest.id] + ([gone[0].id] if gone else []),
     )]
 
 

@@ -41,14 +41,31 @@ def where(row: dict[str, Any]) -> str:
     return f"{row.get('house_num')} {row.get('onstname')} (DOT lot {row.get('bblid')})"
 
 
+def skipped_example(source: Any, saved: list[dict[str, Any]], store: Store) -> str | None:
+    """The fields of the first saved row the store could not turn into a record."""
+    by_bbl = {lot.bbl: lot for lot in store.lots if lot.bbl}
+
+    def at_lot(bbl: str | None) -> tuple[float | None, float | None, str | None]:
+        lot = by_bbl.get(bbl) if bbl else None
+        return (lot.lat, lot.lon, lot.address) if lot else (None, None, None)
+
+    row = next((row for row in saved if source.to_evidence(row, source.dataset, at_lot) is None), None)
+    if row is None:
+        return None
+    return "; ".join(f"{key}={str(value)[:60]}" for key, value in sorted(row.items()) if not key.startswith(":"))
+
+
 def source_lines() -> list[str]:
     store = Store.load(SNAPSHOT_DIR)
     district = District(district_box({"pluto": rows("pluto")}))
     lines = []
     for source in SOURCES.values():
+        saved = rows(source.name)
         placed = [item for item in store.evidence if item.id.startswith(f"{source.name}:")]
         outside = [item for item in placed if not district.contains(item.lat, item.lon)]
-        line = f"{source.label}: {len(rows(source.name)):,} saved, {len(placed):,} placed, {len(placed) - len(outside):,} inside the district"
+        line = f"{source.label}: {len(saved):,} saved, {len(placed):,} placed, {len(placed) - len(outside):,} inside the district"
+        if len(placed) < len(saved) and (example := skipped_example(source, saved, store)):
+            line += f"\n    not placed, e.g. {example}"
         if outside:
             item = outside[0]
             shapes = "; ".join(f"{key}={str(item.raw[key])[:70]}" for key in ("geometry", "location", "the_geom", "wkt") if item.raw.get(key))

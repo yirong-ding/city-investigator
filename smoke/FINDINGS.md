@@ -222,3 +222,10 @@ Flood demo with the city's flood model loaded (hosted Muse Spark 1.3, 48.7 s, ab
 - The extreme 2080 layer timed out on the server (504): its citywide shapes are huge. Timeouts now retry one shape at a time; the two moderate layers saved on their own.
 - The extreme 2080 layer still timed out one shape at a time (three 504s), so it is no longer requested. The flood maps used are the moderate storm with today's and with 2050 sea levels.
 - Final Day 4 flood run (44.3 s, about $0.08): 11 of 11 claims passed, all four flags covered. Muse Spark answered first ("flooding here likely keeps coming back"), wrote one model claim with its caveat ("where water is expected to pond, not what happened that day"), and turned the lighter-rain flag into "it may flood in smaller rain than the model storm ... though rain 11.5 km away can differ a lot".
+
+## How three DOT datasets write places (Oct 29, 2026)
+
+`probe --look` showed why three snapshot steps kept nothing:
+
+- **Street construction permits (tqtj-sjs8):** the geometry is text, so the server cannot select by area. `wkt` is in **New York State Plane feet** (EPSG:2263), not degrees; `locationgeometry` is SQL Server binary. Recent permits often have no geometry at all. The snapshot now asks by the district's street names (85k Brooklyn rows since 2024, against 584k for all of Brooklyn), converts the feet to degrees (checked against pyproj), and places a permit without geometry at its house number's lot, or where its cross streets meet its street (midway between the closest lots on each).
+- **Sidewalk violations (6kbp-uz6m) and tree sidewalk damage (j6v2-6uxq):** `cb` is the bare board number (6), shared by four boroughs, and nothing records the borough. `bblid` is an internal ID, not a BBL. Rows are now matched to district lots by house number and street, in one spelling ("7TH ST." = "7 STREET"); a violation whose cross streets are given must cross a district street, which drops a same-address row in Manhattan.

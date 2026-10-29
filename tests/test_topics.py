@@ -18,7 +18,8 @@ from city_investigator import meta, snapshot, web
 from city_investigator.checks import topic_checks
 from city_investigator.evidence import Evidence, classify_complaint
 from city_investigator.socrata import SocrataError
-from city_investigator.sources import SOURCES
+from city_investigator.geo import from_state_plane
+from city_investigator.sources import SOURCES, address_key, street_key
 from city_investigator.store import FOUND, NO_COVERAGE, PARTIAL, Store
 from city_investigator.topics import TOPICS, detect_topic
 
@@ -89,7 +90,7 @@ def test_each_source_reads_its_rows():
                                             "filing_date": "03/01/2024", "filing_status": "UNSAFE", "bin": "3000001"})
     assert filing.bbl == LOT and "UNSAFE (unsafe)" in filing.summary and filing.address == "1 TEST STREET"
 
-    violation = to_evidence("sidewalk_violations", {"violationid": "V1", "bblid": LOT, "vissuedate": "2024-04-01T00:00:00.000",
+    violation = to_evidence("sidewalk_violations", {"violationid": "V1", "lot_bbl": LOT, "vissuedate": "2024-04-01T00:00:00.000",
                                                     "trip_haz": "Y", "broken": "N", "vdismissdate": "2024-09-01T00:00:00.000"})
     assert "trip hazard; dismissed 2024-09-01" in violation.summary and violation.end is not None
 
@@ -105,8 +106,10 @@ def test_each_source_reads_its_rows():
     assert pothole.lon == pytest.approx(LON + 0.0005) and "on Court Street between Union Street and President Street" in pothole.summary
 
     permit = to_evidence("street_permits", {"permitnumber": "P1", "permittypedesc": "PLATES", "issuedworkstartdate": "2025-05-20T00:00:00.000",
-                                            "issuedworkenddate": "2025-06-20T00:00:00.000", "locationgeometry": point})
+                                            "issuedworkenddate": "2025-06-20T00:00:00.000", "latitude": str(LAT), "longitude": str(LON),
+                                            "located_by": "house number"})
     assert permit.category == "street_permit" and "work allowed 2025-05-20 to 2025-06-20" in permit.summary
+    assert permit.lat == LAT and permit.located_by == "house number"
 
     closure = to_evidence("street_closures", {"uniqueid": "U1", "work_start_date": "2025-05-01T00:00:00.000", "the_geom": point})
     license_ = to_evidence("dining_licenses", {"bbl": LOT, "license_type": "Roadway", "license_status": "Active",
@@ -119,7 +122,7 @@ def test_each_source_reads_its_rows():
     assert to_evidence("pothole_orders", {"defnum": "D2"}) is None  # no date or place: skipped
 
 
-class District:
+class Dining:
     """A data portal where the district is written '06 BROOKLYN' and one form is a type error."""
 
     def __init__(self):
@@ -129,73 +132,109 @@ class District:
         self.asked.append(where)
         if "306 BROOKLYN" in where:
             raise SocrataError("type mismatch", 400)
-        return [{"violationid": "V1", "bblid": LOT, "cb": "06 BROOKLYN"}] if "06 BROOKLYN" in where else []
+        return [{"bbl": LOT, "community_board": "06 BROOKLYN"}] if "06 BROOKLYN" in where else []
 
 
 def test_snapshot_tries_each_way_of_writing_the_district():
-    step = next(step for step in snapshot.plan() if step.name == "sidewalk_violations")
-    client = District()
+    step = next(step for step in snapshot.plan() if step.name == "dining_licenses")
+    client = Dining()
     where, rows = snapshot.fetch_step(client, step, {})
-    assert where == "cb = '06 BROOKLYN' AND vissuedate >= '2015-01-01T00:00:00'" and rows[0]["violationid"] == "V1"
+    assert where == "community_board = '06 BROOKLYN'" and rows[0]["bbl"] == LOT
     assert len(client.asked) == 4  # '306' and 306 matched nothing, '306 BROOKLYN' was refused
 
 
+# A 10 Street segment in State Plane feet, and where pyproj puts it (EPSG:2263 to EPSG:4326).
+SEGMENT_FT = (989222.0208, 182026.3822)
+SEGMENT_DEG = (40.666295666, -73.982077706)
+
+
+def test_state_plane_feet_become_degrees():
+    assert from_state_plane(*SEGMENT_FT) == pytest.approx(SEGMENT_DEG, abs=1e-7)
+    assert from_state_plane(1_000_000, 200_000) == pytest.approx((40.715616479, -73.943185068), abs=1e-7)
+
+
+def test_street_names_are_compared_in_one_spelling():
+    assert street_key("7TH ST.") == street_key("7 STREET") == "7 STREET"
+    assert street_key("E 53RD ST") == "EAST 53 STREET" and street_key("GOETHALS AVE.") == "GOETHALS AVENUE"
+    assert street_key("AVENUE S") == "AVENUE S" and street_key("ST MARKS PL") == "SAINT MARKS PLACE"
+    assert address_key(" 556 ", "henry st") == "556 HENRY STREET" and address_key("", "HENRY STREET") is None
+    assert snapshot.house_and_street("253  4 AVENUE") == ("253", "4 AVENUE")
+    assert snapshot.house_and_street("COURT STREET") is None
+
+
+def district_lots(*extra):
+    """Two lots on Court Street and two on Union Street, meeting at a corner."""
+    lots = [
+        (LOT, "1 COURT STREET", LAT, LON),
+        ("3004560013", "3 COURT STREET", LAT + 0.0004, LON),
+        ("3004560014", "5 UNION STREET", LAT + 0.0001, LON + 0.0003),
+        ("3004560015", "7 UNION STREET", LAT + 0.0001, LON + 0.0008),
+        *extra,
+    ]
+    return {"pluto": [{"bbl": bbl, "address": address, "latitude": str(lat), "longitude": str(lon)} for bbl, address, lat, lon in lots]}
+
+
 class BoardNumber:
-    """A portal that writes only the board number, so district 6 of every borough matches."""
+    """A portal that records the board number without a borough, as DOT's sidewalk datasets do."""
 
     def rows(self, dataset, where):
-        if not where.startswith("cb = '6' "):
+        if not where.startswith("cb = 6 "):
             return []
-        return [{"violationid": "V1", "bblid": LOT, "cb": "6"}, {"violationid": "V2", "bblid": "1000010001", "cb": "6"}]
+        return [
+            {"violationid": "V1", "house_num": "1", "onstname": "COURT ST.", "frstname": "UNION ST", "tostname": "PRESIDENT ST"},
+            {"violationid": "V2", "house_num": "3", "onstname": "COURT STREET", "frstname": "EAST 33 STREET"},  # another borough
+            {"violationid": "V3", "house_num": "325", "onstname": "EAST 53 STREET"},  # not a district address
+        ]
 
 
-def test_a_bare_board_number_is_narrowed_to_the_districts_lots():
+def test_sidewalk_records_are_matched_to_district_lots_by_address():
     step = next(step for step in snapshot.plan() if step.name == "sidewalk_violations")
-    done = {"pluto": [{"bbl": "3004560012.00000000", "latitude": str(LAT), "longitude": str(LON)}]}
-    where, rows = snapshot.fetch_step(BoardNumber(), step, done)
-    assert where.startswith("cb = '6' AND") and [row["violationid"] for row in rows] == ["V1"]  # V2 is in Manhattan
+    where, rows = snapshot.fetch_step(BoardNumber(), step, district_lots())
+    assert where == "cb = 6 AND vissuedate >= '2015-01-01T00:00:00'"
+    assert [(row["violationid"], row["lot_bbl"]) for row in rows] == [("V1", LOT)]
+    violation = to_evidence("sidewalk_violations", {**rows[0], "vissuedate": "2024-04-01T00:00:00.000"})
+    assert violation.bbl == LOT and violation.lat == LAT
+    damage = next(step for step in snapshot.plan() if step.name == "tree_sidewalk_damage")
+    assert damage.select({"atdid": "A1", "house_num": "3", "onstname": "COURT ST."}, district_lots())["lot_bbl"] == "3004560013"
 
 
-def test_street_of_drops_the_house_number():
-    assert snapshot.street_of("253 4 AVENUE") == "4 AVENUE"
-    assert snapshot.street_of(" 12-14  court street") == "COURT STREET"
-    assert snapshot.street_of(None) is None
-
-
-class LongStreetList:
-    """A portal that refuses the district's street list as too long, then answers for all of Brooklyn."""
+class Permits:
+    """Street permits on the district's streets: a mapped segment, or only a house number or cross streets."""
 
     def __init__(self):
         self.asked = []
 
     def rows(self, dataset, where):
         self.asked.append(where)
-        if "onstreetname IN" in where:
-            raise SocrataError("URI too long", 414)
+        x, y = SEGMENT_FT
         return [
-            {"permitnumber": "P1", "locationgeometry": f"POINT ({LON} {LAT})"},
-            {"permitnumber": "P2", "locationgeometry": "POINT (-73.90 40.60)"},  # elsewhere in Brooklyn
-            {"permitnumber": "P3"},  # no place
+            {"permitnumber": "P1", "onstreetname": "10 STREET", "wkt": f"LINESTRING ({x} {y}, {x} {y})"},
+            {"permitnumber": "P2", "onstreetname": "COURT STREET", "permithousenumber": "3"},
+            {"permitnumber": "P3", "onstreetname": "COURT STREET", "fromstreetname": "UNION ST", "tostreetname": "SACKETT STREET"},
+            {"permitnumber": "P4", "onstreetname": "5 AVENUE", "permithousenumber": "8000", "fromstreetname": "80 STREET"},
+            {"permitnumber": "P5", "onstreetname": "COURT STREET"},  # nothing to place it by
         ]
 
 
-def test_street_permits_ask_by_street_then_keep_the_districts_box():
+def test_street_permits_are_placed_by_segment_house_number_or_cross_streets():
     step = next(step for step in snapshot.plan() if step.name == "street_permits")
-    lots = [("3004560012", "1 COURT STREET"), ("3004560013", "3 COURT STREET"), ("3004560014", "5 UNION STREET")]
-    done = {"pluto": [{"bbl": bbl, "address": address, "latitude": str(LAT), "longitude": str(LON)} for bbl, address in lots]}
-    first = step.wheres(done)[0]
-    assert "onstreetname IN ('COURT STREET')" in first  # a street on one lot only is left out
-    client = LongStreetList()
+    done = district_lots(("3010000001", "400 10 STREET", *SEGMENT_DEG))
+    assert "onstreetname IN ('COURT STREET', 'UNION STREET')" in step.wheres(done)[0]  # a street on one lot only is left out
+    client = Permits()
     where, rows = snapshot.fetch_step(client, step, done)
-    assert "IN" not in where and "BROOKLYN" in where and [row["permitnumber"] for row in rows] == ["P1"]
-    assert len(client.asked) == 2
+    assert "onstreetname IN" in where and len(client.asked) == 1
+    placed = {row["permitnumber"]: (float(row["latitude"]), float(row["longitude"]), row["located_by"]) for row in rows}
+    assert set(placed) == {"P1", "P2", "P3"}
+    assert placed["P1"] == pytest.approx((*SEGMENT_DEG, "street segment"))
+    assert placed["P2"] == (pytest.approx(LAT + 0.0004), pytest.approx(LON), "house number")
+    assert placed["P3"] == (pytest.approx(LAT + 0.00005), pytest.approx(LON + 0.00015), "cross streets")  # the Union Street corner
 
 
 def test_borough_wide_filings_keep_only_the_districts_lots():
     step = next(step for step in snapshot.plan() if step.name == "facade_filings")
     done = {"pluto": [{"bbl": "3004560012.00000000", "latitude": str(LAT), "longitude": str(LON)}]}
-    assert step.keep({"block": "456", "lot": "12"}, done)
-    assert not step.keep({"block": "999", "lot": "1"}, done)
+    assert step.select({"block": "456", "lot": "12"}, done)
+    assert step.select({"block": "999", "lot": "1"}, done) is None
     assert "intersects" in next(s for s in snapshot.plan() if s.name == "pothole_orders").wheres(done)[0]
     box = snapshot.district_box(done)
     assert box[0] < LAT < box[2] and box[1] < LON < box[3]
@@ -292,17 +331,16 @@ def test_the_page_lists_topics_and_groups_new_records():
 
 def test_a_snapshot_that_finds_nothing_says_what_each_query_matched():
     step = next(step for step in snapshot.plan() if step.name == "sidewalk_violations")
-    done = {"pluto": [{"bbl": "3004560012.00000000", "latitude": str(LAT), "longitude": str(LON)}]}
     tried = []
 
     class Elsewhere:
         def rows(self, dataset, where):
-            if "306 BROOKLYN" in where:
+            if where.startswith("cb = 6 "):
                 raise SocrataError("type mismatch", 400)
-            return [{"violationid": "V2", "bblid": "1000010001"}] if where.startswith("cb = '6' ") else []
+            return [{"violationid": "V3", "house_num": "325", "onstname": "EAST 53 STREET"}]
 
-    where, rows = snapshot.fetch_step(Elsewhere(), step, done, tried)
-    assert rows == [] and "refused (HTTP 400)" in tried[2] and "1 matched, 0 kept" in tried[4]
+    where, rows = snapshot.fetch_step(Elsewhere(), step, district_lots(), tried)
+    assert rows == [] and "refused (HTTP 400)" in tried[0] and "1 matched, 0 kept" in tried[1]
 
 
 class Portal:
@@ -312,7 +350,7 @@ class Portal:
         self.session = self
 
     def json(self):
-        return {"columns": [{"fieldName": "cb", "dataTypeName": "number"}, {"fieldName": "bblid", "dataTypeName": "text"}]}
+        return {"columns": [{"fieldName": "cb", "dataTypeName": "number"}, {"fieldName": "house_num", "dataTypeName": "text"}]}
 
     def get(self, dataset, params=None, timeout=None):
         if params is None:  # the column types
@@ -320,20 +358,20 @@ class Portal:
         where = params.get("$where", "")
         if "$group" in params:
             return [{"cb": "6", "n": "900"}, {"cb": "1", "n": "800"}]
-        if "'306" in where:
+        if where.startswith("cb = '6'"):
             raise SocrataError("type mismatch", 400)
-        matching = [{"bblid": "3-00456-0012", "cb": "6"}] if where.startswith("cb = 6 ") else []
+        matching = [{"cb": "6", "house_num": "325", "onstname": "EAST 53 STREET"}] if where.startswith("cb = 6 ") else []
         if params.get("$select") == "count(*) AS n":
             return [{"n": str(len(matching))}]
-        return matching if where else [{"cb": "6", "bblid": "3-00456-0012", "vissuedate": "2024-01-01"}]
+        return matching if where else [{"cb": "6", "house_num": "1", "onstname": "COURT ST", "vissuedate": "2024-01-01"}]
 
 
 def test_probe_look_shows_types_values_and_what_each_query_keeps():
     from city_investigator import probe
 
-    district = snapshot.district({"pluto": [{"bbl": LOT, "latitude": str(LAT), "longitude": str(LON)}]})
+    district = snapshot.district(district_lots())
     text = "\n".join(probe.look(Portal(), "sidewalk_violations", district))
-    assert "cb=number" in text and "bblid=text" in text and "'6' (900)" in text
+    assert "cb=number" in text and "house_num=text" in text and "'6' (900)" in text
     assert "refused (HTTP 400)" in text
     assert "cb = 6 AND vissuedate >= '2015-01-01T00:00:00': 1 rows; of 1 read, 0 in the district" in text
-    assert "e.g. cb='6'; bblid='3-00456-0012'" in text  # the lot is written with dashes
+    assert "e.g. cb='6'; house_num='325'; onstname='EAST 53 STREET'" in text

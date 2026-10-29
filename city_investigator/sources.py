@@ -4,17 +4,22 @@ Each source names its dataset, how the snapshot selects this district's rows (se
 where clauses, tried in order, because the city stores places in different column
 types), what its records can and cannot show, and how one row becomes evidence. Rows
 are placed by their own coordinates where they have them, otherwise at their tax lot.
+Some datasets record neither a borough nor coordinates the server can search; for those
+the snapshot selects rows itself, matching house numbers and street names to the
+district's tax lots, and saves where it placed each row alongside it.
 
 Column names were read from the city's catalog (city_investigator.probe).
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
+import re
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+import numpy as np
 import shapely
 from shapely.errors import GEOSException
 from shapely.geometry import shape
@@ -22,7 +27,7 @@ from shapely.geometry import shape
 from city_investigator import times
 from city_investigator.config import CURB_RAMPS, FACADES, OUTDOOR_DINING, POTHOLES, SIDEWALK_DAMAGE, STREET_CONSTRUCTION, TREES
 from city_investigator.evidence import Evidence, day, first, join_address, norm_bbl, norm_bin
-from city_investigator.geo import point
+from city_investigator.geo import from_state_plane, point
 from city_investigator.socrata import record_url
 
 Box = tuple[float, float, float, float]  # south, west, north, east
@@ -37,6 +42,28 @@ FISP_STATUS = {
 }
 
 
+CORNER_M = 80.0  # lots on two streets this close mark where the streets cross
+DIRECTIONS = {"E": "EAST", "W": "WEST", "N": "NORTH", "S": "SOUTH"}
+SUFFIXES = {
+    "ST": "STREET", "AVE": "AVENUE", "AV": "AVENUE", "PL": "PLACE", "RD": "ROAD", "BLVD": "BOULEVARD",
+    "PKWY": "PARKWAY", "DR": "DRIVE", "LN": "LANE", "CT": "COURT", "TER": "TERRACE", "SQ": "SQUARE",
+}
+
+
+def street_key(name: Any) -> str | None:
+    """A street name in one spelling: '7TH ST.' and '7 STREET' both become '7 STREET'."""
+    words = [re.sub(r"^(\d+)(ST|ND|RD|TH)$", r"\1", word) for word in re.sub(r"[.,]", " ", str(name or "").upper()).split()]
+    if len(words) > 1:
+        words[0] = "SAINT" if words[0] == "ST" else DIRECTIONS.get(words[0], words[0])
+        words[-1] = SUFFIXES.get(words[-1], words[-1])
+    return " ".join(words) or None
+
+
+def address_key(house: Any, street: Any) -> str | None:
+    number, name = " ".join(str(house or "").upper().split()), street_key(street)
+    return f"{number} {name}" if number and name else None
+
+
 @dataclass(frozen=True)
 class District:
     """What the snapshot knows about the district when it selects rows."""
@@ -44,10 +71,45 @@ class District:
     box: Box  # around its tax lots
     lots: frozenset[str] = frozenset()  # their BBLs
     streets: tuple[str, ...] = ()  # street names in their addresses, as PLUTO writes them
+    addresses: Mapping[str, tuple[str, float, float]] = field(default_factory=dict)  # address_key -> bbl, lat, lon
+    street_lots: Mapping[str, tuple[tuple[float, float], ...]] = field(default_factory=dict)  # street_key -> lot points
+    _crossings: dict[tuple[str | None, str | None], tuple[float, float] | None] = field(default_factory=dict, repr=False, compare=False)
+
+    def contains(self, lat: float | None, lon: float | None) -> bool:
+        south, west, north, east = self.box
+        return lat is not None and lon is not None and south <= lat <= north and west <= lon <= east
+
+    def at_address(self, house: Any, street: Any) -> tuple[str, float, float] | None:
+        """The district lot at a house number and street, in any of the city's spellings."""
+        key = address_key(house, street)
+        return self.addresses.get(key) if key else None
+
+    def crossing(self, a: Any, b: Any) -> tuple[float, float] | None:
+        """Where two streets cross: midway between the closest pair of lots on each, if they are close."""
+        key = (street_key(a), street_key(b))
+        if key not in self._crossings:
+            self._crossings[key] = closest_pair(self.street_lots.get(key[0] or "", ()), self.street_lots.get(key[1] or "", ())) \
+                if key[0] != key[1] else None
+        return self._crossings[key]
 
 
-def keep_all(row: dict[str, Any], district: District) -> bool:
-    return True
+def closest_pair(first: tuple[tuple[float, float], ...], second: tuple[tuple[float, float], ...]) -> tuple[float, float] | None:
+    if not first or not second:
+        return None
+    a, b = np.array(first), np.array(second)
+    scale = np.array([111_320.0, 111_320.0 * np.cos(np.radians(a[0, 0]))])  # degrees to meters
+    gaps = np.linalg.norm((a[:, None, :] - b[None, :, :]) * scale, axis=2)
+    i, j = np.unravel_index(np.argmin(gaps), gaps.shape)
+    if gaps[i, j] > CORNER_M:
+        return None
+    return float((a[i, 0] + b[j, 0]) / 2), float((a[i, 1] + b[j, 1]) / 2)
+
+
+Row = dict[str, Any]
+
+
+def as_is(row: Row, district: District) -> Row | None:
+    return row
 
 
 @dataclass(frozen=True)
@@ -59,7 +121,8 @@ class Source:
     caveat: str  # what the records cannot show
     where: Callable[[District], list[str]]  # SoQL where clauses, tried in order
     to_evidence: Callable[[dict[str, Any], str, LotFinder], Evidence | None]
-    keep: Callable[[dict[str, Any], District], bool] = keep_all  # for rows a where clause cannot narrow
+    # For rows a where clause cannot narrow: the row to save, with any place found for it, or None to drop it.
+    select: Callable[[Row, District], Row | None] = as_is
 
 
 # Selecting rows
@@ -85,14 +148,10 @@ def in_district(column: str, extra: str = "") -> Callable[[District], list[str]]
     return lambda district: with_extra(forms, extra)
 
 
-def board_or_borough(column: str, bbl_column: str, extra: str = "") -> Callable[[District], list[str]]:
-    """The district's forms first; then district 6 of every borough, and last all of Brooklyn,
-    both narrowed to the district's tax lots by the source's keep."""
-    wider = [
-        f"{column} = '6'", f"{column} = 6", f"{column} = 'BK06'", f"{column} = '06'",
-        f"starts_with({bbl_column}, '3')", f"{bbl_column} >= 3000000000 AND {bbl_column} < 4000000000",
-    ]
-    return lambda district: [*in_district(column, extra)(district), *with_extra(wider, extra)]
+def board_number(column: str, extra: str = "") -> Callable[[District], list[str]]:
+    """For datasets that record the board number without a borough: district 6 of every
+    borough, narrowed to this district's lots by the source's select."""
+    return lambda district: with_extra([f"{column} = 6", f"{column} = '6'"], extra)
 
 
 def on_streets(column: str, extra: str) -> Callable[[District], list[str]]:
@@ -106,17 +165,52 @@ def on_streets(column: str, extra: str) -> Callable[[District], list[str]]:
     return where
 
 
-def on_lots(read_bbl: Callable[[dict[str, Any]], str | None]) -> Callable[[dict[str, Any], District], bool]:
-    return lambda row, district: not district.lots or read_bbl(row) in district.lots
+def on_lots(read_bbl: Callable[[Row], str | None]) -> Callable[[Row, District], Row | None]:
+    return lambda row, district: row if not district.lots or read_bbl(row) in district.lots else None
 
 
-def in_box(*columns: str) -> Callable[[dict[str, Any], District], bool]:
-    def keep(row: dict[str, Any], district: District) -> bool:
-        lat, lon = center(row, *columns)
-        south, west, north, east = district.box
-        return lat is not None and lon is not None and south <= lat <= north and west <= lon <= east
+def at_district_address(house: str, street: str, *cross_streets: str) -> Callable[[Row, District], Row | None]:
+    """Rows whose address is a district lot, saved with that lot as lot_bbl. Other boroughs
+    share street names, so a row whose cross streets are given must cross a district street."""
+    def select(row: Row, district: District) -> Row | None:
+        found = district.at_address(row.get(house), row.get(street))
+        crosses = [key for column in cross_streets if (key := street_key(row.get(column)))]
+        if not found or (crosses and not any(key in district.street_lots for key in crosses)):
+            return None
+        return {**row, "lot_bbl": found[0]}
 
-    return keep
+    return select
+
+
+def projected_center(text: Any) -> tuple[float | None, float | None]:
+    """The center of a WKT geometry given in State Plane feet (or, if small enough, degrees)."""
+    try:
+        middle = shapely.from_wkt(text).centroid if isinstance(text, str) and text.strip() else None
+    except (GEOSException, ValueError, TypeError):
+        return None, None
+    if middle is None or middle.is_empty:
+        return None, None
+    if abs(middle.x) <= 180 and abs(middle.y) <= 90:
+        return middle.y, middle.x
+    return from_state_plane(middle.x, middle.y)
+
+
+def place_permit(row: Row, district: District) -> Row | None:
+    """A permit's mapped segment; failing that its house number, or where its cross streets meet
+    its street. Saved with the point and how it was found; None outside the district."""
+    lat, lon = projected_center(row.get("wkt"))
+    located_by = "street segment"
+    if lat is None and (lot := district.at_address(row.get("permithousenumber"), row.get("onstreetname"))):
+        _, lat, lon = lot
+        located_by = "house number"
+    if lat is None:
+        ends = [end for side in ("fromstreetname", "tostreetname") if (end := district.crossing(row.get("onstreetname"), row.get(side)))]
+        if ends:
+            lat, lon = sum(end[0] for end in ends) / len(ends), sum(end[1] for end in ends) / len(ends)
+            located_by = "cross streets"
+    if not district.contains(lat, lon):
+        return None
+    return {**row, "latitude": f"{lat:.6f}", "longitude": f"{lon:.6f}", "located_by": located_by}
 
 
 # Reading rows
@@ -302,7 +396,7 @@ SIDEWALK_DEFECTS = {
 def sidewalk_violation(row: dict[str, Any], dataset: str, lot: LotFinder) -> Evidence | None:
     rid = first(row, "violationid", "swv_number")
     issued = when(row, "vissuedate", "entrydate")
-    bbl = bbl_from(row, "bblid")
+    bbl = bbl_from(row, "lot_bbl")
     lat, lon, lot_address = lot(bbl)
     if not rid or issued is None or lat is None:
         return None
@@ -321,7 +415,7 @@ def sidewalk_violation(row: dict[str, Any], dataset: str, lot: LotFinder) -> Evi
 def tree_sidewalk_damage(row: dict[str, Any], dataset: str, lot: LotFinder) -> Evidence | None:
     rid = first(row, "atdid", "atd_number")
     issued = when(row, "atdissuedate", "inspect_date")
-    bbl = bbl_from(row, "bblid")
+    bbl = bbl_from(row, "lot_bbl")
     lat, lon, lot_address = lot(bbl)
     if not rid or issued is None or lat is None:
         return None
@@ -394,7 +488,7 @@ def pothole_order(row: dict[str, Any], dataset: str, lot: LotFinder) -> Evidence
 def street_permit(row: dict[str, Any], dataset: str, lot: LotFinder) -> Evidence | None:
     rid = first(row, "permitnumber", "applicationtrackingid")
     start = when(row, "issuedworkstartdate", "permitissuedate")
-    lat, lon = center(row, "locationgeometry", "wkt")
+    lat, lon = point(row, ("latitude", "longitude"))
     if not rid or start is None or lat is None:
         return None
     purpose = str(row.get("permitpurposecomments") or "").strip()
@@ -404,7 +498,7 @@ def street_permit(row: dict[str, Any], dataset: str, lot: LotFinder) -> Evidence
         row, SOURCES["street_permits"], str(rid), "street_permit",
         f"DOT street construction permit: {row.get('permittypedesc') or 'type not recorded'}"
         + (f" ({purpose[:90]})" if purpose else "") + f", work allowed {day(start)} to {day(end)}" + (f" {where}" if where else ""),
-        lat=lat, lon=lon, located_by="street segment", start=start, end=end,
+        lat=lat, lon=lon, located_by=str(row.get("located_by") or "street segment"), start=start, end=end,
         address=join_address(row.get("permithousenumber"), row.get("onstreetname")) or None,
         url_filter={"permitnumber": str(rid)} if row.get("permitnumber") else None,
     )
@@ -482,14 +576,16 @@ SOURCES: dict[str, Source] = {
         Source("facade_filings", "xubg-57si", FACADES, "Façade inspection filings (Local Law 11)",
                "Only buildings taller than six stories must file, every five years; a lower building has no filings, which says nothing about its safety.",
                lambda _: ["upper(borough) = 'BROOKLYN'", "borough = '3'", "borough = 3"], facade_filing,
-               on_lots(lambda row: bbl_from_block_lot(row))),
+               on_lots(bbl_from_block_lot)),
         Source("sidewalk_violations", "6kbp-uz6m", SIDEWALK_DAMAGE, "DOT sidewalk violations",
-               "DOT inspects after complaints or in planned sweeps; a dismissal means the repair was accepted or the violation withdrawn.",
-               board_or_borough("cb", "bblid", "vissuedate >= '2015-01-01T00:00:00'"), sidewalk_violation,
-               on_lots(lambda row: bbl_from(row, "bblid"))),
+               "DOT inspects after complaints or in planned sweeps; a dismissal means the repair was accepted or the violation withdrawn. "
+               "The dataset records no borough, so violations are matched to the district's lots by house number, street and cross streets.",
+               board_number("cb", "vissuedate >= '2015-01-01T00:00:00'"), sidewalk_violation,
+               at_district_address("house_num", "onstname", "frstname", "tostname")),
         Source("tree_sidewalk_damage", "j6v2-6uxq", SIDEWALK_DAMAGE, "DOT sidewalk damage from street trees",
-               "Damage caused by a street tree is recorded separately from the owner's violations.",
-               board_or_borough("cb", "bblid"), tree_sidewalk_damage, on_lots(lambda row: bbl_from(row, "bblid"))),
+               "Damage caused by a street tree is recorded separately from the owner's violations. "
+               "The dataset records no borough, so records are matched to the district's lots by house number and street.",
+               board_number("cb"), tree_sidewalk_damage, at_district_address("house_num", "onstname")),
         Source("ramps", "ufzp-rrqu", CURB_RAMPS, "DOT pedestrian ramp survey",
                "Each ramp was surveyed once (the dataset was last updated in 2021); later repairs may be missing.",
                inside(("the_geom",)), ramp_survey),
@@ -500,10 +596,11 @@ SOURCES: dict[str, Source] = {
                "Only closed work orders are published: a pothole still waiting for repair has no record here.",
                inside(("the_geom",), f"rptdate >= '{SINCE}'"), pothole_order),
         Source("street_permits", "tqtj-sjs8", STREET_CONSTRUCTION, "DOT street construction permits",
-               "A permit shows work was allowed in its window, not that it happened; emergency work can start before its permit.",
-               # Its geometry is stored as text, so the server cannot select by area.
+               "A permit shows work was allowed in its window, not that it happened; emergency work can start before its permit. "
+               "Permits without a mapped segment are placed by house number or cross streets; those with neither are left out.",
+               # Its geometry is text in State Plane feet, so the server cannot select by area.
                on_streets("onstreetname", "upper(boroughname) = 'BROOKLYN' AND issuedworkenddate >= '2024-01-01T00:00:00'"),
-               street_permit, in_box("locationgeometry", "wkt")),
+               street_permit, place_permit),
         Source("street_closures", "i6b5-j7bu", STREET_CONSTRUCTION, "DOT street closures for construction",
                "Planned closures; the work itself can be shorter.",
                inside(("the_geom",), "work_end_date >= '2023-01-01T00:00:00'"), street_closure),

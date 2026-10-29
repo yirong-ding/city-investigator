@@ -4,6 +4,7 @@ pillow>=10
 pillow-heif>=0.16
 requests>=2.31
 shapely>=2.0
+numpy>=1.24
 fastapi>=0.110
 uvicorn>=0.29
 python-multipart>=0.0.9

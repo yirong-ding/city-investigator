@@ -21,7 +21,7 @@ import io
 import json
 import re
 import time
-from collections import Counter
+from collections import Counter, defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
@@ -49,7 +49,7 @@ from city_investigator.evidence import classify_complaint, norm_bbl
 from city_investigator.geo import to_float
 from city_investigator.settings import SNAPSHOT_DIR, load_env
 from city_investigator.socrata import Socrata, SocrataError
-from city_investigator.sources import SOURCES, District
+from city_investigator.sources import SOURCES, District, address_key, street_key
 
 IEM_URL = "https://mesonet.agron.iastate.edu/cgi-bin/request/asos.py"
 ARCGIS_PAGE = 1000
@@ -70,7 +70,8 @@ class Step:
     dataset: str
     # SoQL where clauses to try in order; later ones are fallbacks for type differences.
     wheres: Callable[[dict[str, list[dict[str, Any]]]], list[str]]
-    keep: Callable[[dict[str, Any], dict[str, list[dict[str, Any]]]], bool] = lambda row, done: True
+    # The row to save (with anything found for it added), or None to leave it out.
+    select: Callable[[dict[str, Any], dict[str, list[dict[str, Any]]]], dict[str, Any] | None] = lambda row, done: row
 
 
 def district_box(done: dict[str, list[dict[str, Any]]], margin_deg: float = 0.002) -> tuple[float, float, float, float]:
@@ -86,23 +87,37 @@ def district_box(done: dict[str, list[dict[str, Any]]], margin_deg: float = 0.00
 _districts: dict[int, tuple[list[dict[str, Any]], District]] = {}  # holding the rows keeps their id unique
 
 
-def street_of(address: Any) -> str | None:
-    """'253 4 AVENUE' -> '4 AVENUE': the street of a PLUTO address."""
-    text = " ".join(str(address or "").upper().split())
-    return re.sub(r"^\S*\d\S*\s+", "", text) or None
+def house_and_street(address: Any) -> tuple[str, str] | None:
+    """'253 4 AVENUE' -> ('253', '4 AVENUE'): a PLUTO address split after its house number."""
+    match = re.match(r"^(\S*\d\S*)\s+(.+)$", " ".join(str(address or "").upper().split()))
+    return (match[1], match[2]) if match else None
 
 
 def district(done: dict[str, list[dict[str, Any]]]) -> District:
-    """The district's box, lots and streets, from its downloaded tax lots (computed once per download)."""
+    """The district's box, lots, streets and addresses, from its downloaded tax lots (computed
+    once per download)."""
     pluto = done.get("pluto")
     if not pluto:
         return District(district_box(done))
     if id(pluto) not in _districts:
-        streets = Counter(street for row in pluto if (street := street_of(row.get("address"))))
+        streets: Counter[str] = Counter()
+        addresses: dict[str, tuple[str, float, float]] = {}
+        street_lots: dict[str, list[tuple[float, float]]] = defaultdict(list)
+        for row in pluto:
+            parts = house_and_street(row.get("address"))
+            bbl, lat, lon = norm_bbl(row.get("bbl")), to_float(row.get("latitude")), to_float(row.get("longitude"))
+            if not parts:
+                continue
+            streets[parts[1]] += 1
+            if bbl and lat is not None and lon is not None:
+                addresses.setdefault(address_key(*parts) or "", (bbl, lat, lon))
+                street_lots[street_key(parts[1]) or ""].append((lat, lon))
         _districts[id(pluto)] = pluto, District(
             district_box(done),
             frozenset(bbl for row in pluto if (bbl := norm_bbl(row.get("bbl")))),
             tuple(sorted(street for street, lots in streets.items() if lots >= 2)),
+            addresses,
+            {street: tuple(points) for street, points in street_lots.items()},
         )
     return _districts[id(pluto)][1]
 
@@ -114,7 +129,7 @@ def source_steps() -> list[Step]:
             source.name,
             source.dataset,
             lambda done, source=source: source.where(district(done)),
-            keep=lambda row, done, source=source: source.keep(row, district(done)),
+            select=lambda row, done, source=source: source.select(row, district(done)),
         )
         for source in SOURCES.values()
     ]
@@ -136,13 +151,13 @@ def plan() -> list[Step]:
                 f"community_board = '{board}' AND created_date >= '2020-01-01T00:00:00' "
                 f"AND complaint_type IN ({quoted(COMPLAINT_TYPES)})"
             ],
-            keep=lambda row, done: classify_complaint(row.get("complaint_type"), row.get("descriptor")) is not None,
+            select=lambda row, done: row if classify_complaint(row.get("complaint_type"), row.get("descriptor")) else None,
         ),
         Step(
             "311_2010s",
             DATASETS["311_2010s"],
             lambda _: [f"community_board = '{board}' AND complaint_type IN ({quoted(FLOOD_COMPLAINT_TYPES)})"],
-            keep=lambda row, done: classify_complaint(row.get("complaint_type"), row.get("descriptor")) is not None,
+            select=lambda row, done: row if classify_complaint(row.get("complaint_type"), row.get("descriptor")) else None,
         ),
         Step(
             "dob_now_permits",
@@ -198,7 +213,7 @@ def fetch_step(
                 raise
             tried.append(f"{shorten(where)}: refused (HTTP {error.status})")
             continue
-        kept = [scrub(row) for row in rows if step.keep(row, done)]
+        kept = [scrub(selected) for row in rows if (selected := step.select(row, done)) is not None]
         tried.append(f"{shorten(where)}: {len(rows)} matched, {len(kept)} kept")
         if kept:
             return where, kept

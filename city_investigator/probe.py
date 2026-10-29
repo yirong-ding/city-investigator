@@ -54,9 +54,9 @@ SEARCHES = {
 
 # The columns each source is selected and placed by; the first is grouped to show its values.
 LOOK = {
-    "sidewalk_violations": ("cb", "bblid", "vissuedate", "house_num", "onstname"),
-    "tree_sidewalk_damage": ("cb", "bblid", "atdissuedate", "house_num", "onstname"),
-    "street_permits": ("boroughname", "onstreetname", "issuedworkenddate", "locationgeometry", "wkt"),
+    "sidewalk_violations": ("cb", "house_num", "onstname", "frstname", "tostname", "vissuedate"),
+    "tree_sidewalk_damage": ("cb", "house_num", "onstname", "atdissuedate"),
+    "street_permits": ("boroughname", "permithousenumber", "onstreetname", "fromstreetname", "tostreetname", "issuedworkenddate", "wkt"),
 }
 VIEWS = "https://data.cityofnewyork.us/api/views"
 
@@ -133,7 +133,7 @@ def look(client: Socrata, name: str, district: District) -> list[str]:
         except SocrataError as error:
             lines.append(f"{label}: refused (HTTP {error.status})")
             continue
-        kept = [row for row in rows if source.keep(row, district)]
+        kept = [row for row in rows if source.select(row, district) is not None]
         found = f"{label}: {count} rows" + (f"; of {len(rows)} read, {len(kept)} in the district" if rows else "")
         lines.append(found + (f"\n      e.g. {describe(rows[0], columns)}" if rows and not kept else ""))
     return lines

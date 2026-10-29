@@ -66,3 +66,38 @@ def point(row: dict, *pairs: tuple[str, str]) -> tuple[float | None, float | Non
             if found:
                 return found
     return None, None
+
+
+# New York State Plane, Long Island zone, in US survey feet (EPSG:2263): a Lambert conformal
+# conic projection of the GRS80 ellipsoid, which some city datasets use instead of degrees.
+_A = 6_378_137.0
+_E = math.sqrt(2 / 298.257222101 - (1 / 298.257222101) ** 2)
+_FOOT_M = 1200 / 3937
+_LAT1, _LAT2, _LAT0 = (math.radians(deg + minute / 60) for deg, minute in ((41, 2), (40, 40), (40, 10)))
+_LON0 = math.radians(-74.0)
+_EAST0_M = 300_000.0
+
+
+def _m(phi: float) -> float:
+    return math.cos(phi) / math.sqrt(1 - (_E * math.sin(phi)) ** 2)
+
+
+def _t(phi: float) -> float:
+    return math.tan(math.pi / 4 - phi / 2) / ((1 - _E * math.sin(phi)) / (1 + _E * math.sin(phi))) ** (_E / 2)
+
+
+_N = (math.log(_m(_LAT1)) - math.log(_m(_LAT2))) / (math.log(_t(_LAT1)) - math.log(_t(_LAT2)))
+_F = _m(_LAT1) / (_N * _t(_LAT1) ** _N)
+_RHO0 = _A * _F * _t(_LAT0) ** _N
+
+
+def from_state_plane(x_ft: float, y_ft: float) -> tuple[float, float]:
+    """(lat, lon) of a New York Long Island State Plane point given in feet."""
+    x = x_ft * _FOOT_M - _EAST0_M
+    y = _RHO0 - y_ft * _FOOT_M
+    rho = math.hypot(x, y)
+    t = (rho / (_A * _F)) ** (1 / _N)
+    phi = math.pi / 2 - 2 * math.atan(t)
+    for _ in range(8):
+        phi = math.pi / 2 - 2 * math.atan(t * ((1 - _E * math.sin(phi)) / (1 + _E * math.sin(phi))) ** (_E / 2))
+    return math.degrees(phi), math.degrees(math.atan2(x, y) / _N + _LON0)

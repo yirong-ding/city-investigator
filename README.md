@@ -124,7 +124,8 @@ When a check fails, Muse Spark gets one chance to fix its answer, and the better
 
 ```bash
 python -m city_investigator.snapshot            # download Brooklyn Community District 6 records
-python -m city_investigator.shortlist --photos  # candidate demo sites, with Mapillary photos
+python -m city_investigator.shortlist --photos  # candidate demo sites for every topic, with Mapillary photos
+python -m city_investigator.shortlist --photos --topic trees --top 5  # one newer topic, with the command to investigate each site
 python -m city_investigator.lookup --lat 40.6787 --lon -73.9830 --start 2026-08-22 --end 2026-08-26 --topic flooding
 ```
 

@@ -1,33 +1,40 @@
-"""Shortlist demo sites: the longest-standing sheds and the most-flooded sensor corners.
+"""Shortlist demo sites: the longest-standing sheds, the most-flooded sensor corners, and
+for each newer topic the places where the most sources have something to say.
 
 Writes data/derived/shortlist.md and shortlist.json. Every site has a Street View
 link for scouting by eye and, with --photos and MAPILLARY_TOKEN set, the newest
-Mapillary photos nearby, which the app may use with credit.
+Mapillary photos nearby, which the app may use with credit, and the command that
+investigates the best one.
 
 Usage:
   python -m city_investigator.shortlist
-  python -m city_investigator.shortlist --photos
+  python -m city_investigator.shortlist --photos --topic trees --top 5
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
 from collections import Counter, defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from city_investigator import times
-from city_investigator.evidence import Sensor, day
-from city_investigator.geo import to_float
+from city_investigator.evidence import Evidence, Sensor, day
+from city_investigator.geo import distance_m, to_float
 from city_investigator.photos import photos_near
 from city_investigator.settings import DERIVED_DIR, load_env
 from city_investigator.sheds import build_chains
+from city_investigator.sources import STATE_CATEGORIES
 from city_investigator.store import Store
+from city_investigator.topics import TOPICS, in_topic
 
 SHED_COMPLAINT_RADIUS_M = 50
 FLOOD_COMPLAINT_RADIUS_M = 150
 PHOTO_RADIUS_M = 40
+SITE_YEARS = 3  # a topic site is built from records of the last few years (and standing ones)
+NEW_TOPICS = [key for key in TOPICS if key not in ("flooding", "sidewalk")]
 
 
 def street_view(lat: float, lon: float) -> str:
@@ -87,6 +94,71 @@ def flood_sites(store: Store, top: int) -> list[dict[str, Any]]:
     return sites[:top]
 
 
+def topic_sites(store: Store, topic: str, at: datetime, top: int) -> list[dict[str, Any]]:
+    """Places where the most sources have recent records of the topic within its radius.
+
+    Every recent record (not a standing one such as a tree in the inventory) is a
+    candidate center; centers are ranked by how many sources, then 311 complaints, then
+    records surround them, and kept only if they are well apart.
+    """
+    radius = TOPICS[topic].radius_m
+    since = at - timedelta(days=365 * SITE_YEARS)
+    items = [
+        item for item in store.evidence
+        if item.lat is not None and item.lon is not None and in_topic(topic, item.topic, item.category)
+        and (item.category in STATE_CATEGORIES or (item.start is not None and item.start >= since))
+    ]
+    if not items:
+        return []
+    # A grid of cells one radius wide, so each center only measures its neighbors.
+    lat_cell = radius / 111_320
+    lon_cell = lat_cell / math.cos(math.radians(items[0].lat or 0))
+    grid: dict[tuple[int, int], list[Evidence]] = defaultdict(list)
+    for item in items:
+        grid[int(item.lat // lat_cell), int(item.lon // lon_cell)].append(item)  # type: ignore[operator]
+
+    def around(center: Evidence) -> list[Evidence]:
+        row, column = int(center.lat // lat_cell), int(center.lon // lon_cell)  # type: ignore[operator]
+        return [
+            item for d_row in (-1, 0, 1) for d_column in (-1, 0, 1) for item in grid.get((row + d_row, column + d_column), ())
+            if distance_m(center.lat, center.lon, item.lat, item.lon) <= radius  # type: ignore[arg-type]
+        ]
+
+    ranked = []
+    measured: set[tuple[float, float]] = set()
+    for center in items:
+        spot = (round(center.lat, 5), round(center.lon, 5))  # type: ignore[arg-type]
+        if center.category in STATE_CATEGORIES or spot in measured:  # many permits share one segment
+            continue
+        measured.add(spot)
+        nearby = around(center)
+        complaints = sum(1 for item in nearby if item.id.startswith("311:"))
+        ranked.append(((len({item.source for item in nearby}), complaints, len(nearby)), center, nearby))
+    ranked.sort(key=lambda entry: entry[0], reverse=True)
+
+    sites: list[dict[str, Any]] = []
+    for _, center, nearby in ranked:
+        if len(sites) == top:
+            break
+        if any(distance_m(center.lat, center.lon, site["lat"], site["lon"]) < 2 * radius for site in sites):  # type: ignore[arg-type]
+            continue
+        dated = sorted((item for item in nearby if item.start), key=lambda item: item.start)  # type: ignore[arg-type, return-value]
+        sites.append({
+            "topic": topic,
+            "address": center.address or next((item.address for item in nearby if item.address), None),
+            "lat": center.lat,
+            "lon": center.lon,
+            "sources": sorted({item.source for item in nearby}),
+            "records": dict(Counter(item.category for item in nearby).most_common()),
+            "first": day(dated[0].start) if dated else None,
+            "latest": day(dated[-1].start) if dated else None,
+            "newest": [item.summary[:160] for item in reversed(dated[-3:])],
+            "record_ids": [item.id for item in nearby],
+            "street_view": street_view(center.lat, center.lon),  # type: ignore[arg-type]
+        })
+    return sites
+
+
 def best_photos(photos: list[dict[str, Any]], site: dict[str, Any], keep: int = 5) -> list[dict[str, Any]]:
     """Photos most likely to show the site: facing it and close.
 
@@ -115,6 +187,12 @@ def add_photos(sites: list[dict[str, Any]], keep: int = 5) -> None:
         site["facing_count"] = sum(1 for photo in photos if photo["faces_site"])
         site["photo_years"] = f"{years[0]} to {years[-1]}" if years else None
         site["photos"] = best_photos(photos, site, keep)
+        if site.get("topic") and site["photos"]:
+            question = TOPICS[site["topic"]].example.replace('"', "'")
+            site["command"] = (
+                f'python -m city_investigator.investigate {site["photos"][0]["id"]} --question "{question}" '
+                f'--topic {site["topic"]} --yes --explain'
+            )
 
 
 def photo_period(photo: dict[str, Any], site: dict[str, Any]) -> str | None:
@@ -150,7 +228,40 @@ def photo_lines(site: dict[str, Any]) -> list[str]:
     return lines
 
 
-def to_markdown(sheds: list[dict[str, Any]], floods: list[dict[str, Any]], generated: datetime) -> str:
+def topic_markdown(topic: str, sites: list[dict[str, Any]]) -> list[str]:
+    spec = TOPICS[topic]
+    lines = [
+        "",
+        f"## {spec.label}",
+        "",
+        f"Within {spec.radius_m:.0f} m, records from the last {SITE_YEARS} years (and standing records such as inventories).",
+        "",
+        "| # | Address | Sources | Records | First | Latest | Street View |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    if not sites:
+        return [*lines, "| - | No records of this topic in the snapshot | | | | | |"]
+    for index, site in enumerate(sites, 1):
+        records = ", ".join(f"{category} {n}" for category, n in site["records"].items())
+        place = site["address"] or f"{site['lat']:.5f}, {site['lon']:.5f}"
+        lines.append(
+            f"| {index} | {place} | {len(site['sources'])} | {records} | "
+            f"{site['first'] or '-'} | {site['latest'] or '-'} | [view]({site['street_view']}) |"
+        )
+    for index, site in enumerate(sites, 1):
+        extra = photo_lines(site)
+        lines += ["", f"{spec.label} site {index} ({site['address'] or 'no address'}): newest records:"]
+        lines += [f"  - {summary}" for summary in site["newest"]]
+        lines += extra
+        if site.get("command"):
+            lines.append(f"  - Investigate the best photo: `{site['command']}`")
+    return lines
+
+
+def to_markdown(
+    sheds: list[dict[str, Any]], floods: list[dict[str, Any]], generated: datetime,
+    topics: dict[str, list[dict[str, Any]]] | None = None,
+) -> str:
     lines = [
         "# Demo site shortlist",
         "",
@@ -190,6 +301,8 @@ def to_markdown(sheds: list[dict[str, Any]], floods: list[dict[str, Any]], gener
         extra = photo_lines(site)
         if extra:
             lines += ["", f"Photos near flood corner {index} ({site['sensor']}):", *extra]
+    for topic, sites in (topics or {}).items():
+        lines += topic_markdown(topic, sites)
     return "\n".join(lines) + "\n"
 
 
@@ -197,18 +310,20 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--photos", action="store_true", help="add nearby Mapillary photos (needs MAPILLARY_TOKEN)")
     parser.add_argument("--top", type=int, default=10)
+    parser.add_argument("--topic", action="append", choices=NEW_TOPICS, help="only these newer topics (repeatable); default all")
     args = parser.parse_args()
     load_env()
     store = Store.load()
     at = times.now()
     sheds = shed_sites(store, at, args.top)
     floods = flood_sites(store, args.top)
+    topics = {topic: topic_sites(store, topic, at, args.top) for topic in args.topic or NEW_TOPICS}
     if args.photos:
-        add_photos(sheds)
-        add_photos(floods)
+        for sites in (sheds, floods, *topics.values()):
+            add_photos(sites)
     DERIVED_DIR.mkdir(parents=True, exist_ok=True)
-    (DERIVED_DIR / "shortlist.json").write_text(json.dumps({"sheds": sheds, "flood_corners": floods}, indent=2))
-    markdown = to_markdown(sheds, floods, at)
+    (DERIVED_DIR / "shortlist.json").write_text(json.dumps({"sheds": sheds, "flood_corners": floods, "topics": topics}, indent=2))
+    markdown = to_markdown(sheds, floods, at, topics)
     (DERIVED_DIR / "shortlist.md").write_text(markdown, encoding="utf-8")
     print(markdown)
     print(f"Saved to {DERIVED_DIR / 'shortlist.md'}")

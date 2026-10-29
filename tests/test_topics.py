@@ -375,3 +375,21 @@ def test_probe_look_shows_types_values_and_what_each_query_keeps():
     assert "refused (HTTP 400)" in text
     assert "cb = 6 AND vissuedate >= '2015-01-01T00:00:00': 1 rows; of 1 read, 0 in the district" in text
     assert "e.g. cb='6'; house_num='325'; onstname='EAST 53 STREET'" in text
+
+
+def test_shortlist_finds_topic_sites_with_a_command_for_the_best_photo(store, tmp_path, monkeypatch):  # noqa: F811
+    from city_investigator import shortlist
+
+    write_sources(tmp_path)
+    loaded = Store.load(tmp_path)
+    sites = shortlist.topic_sites(loaded, "potholes", WHEN, 5)
+    assert len(sites) == 1 and sites[0]["records"] == {"pothole_repair": 1} and sites[0]["latest"] == "2025-04-01"
+    assert shortlist.topic_sites(loaded, "trees", WHEN, 5) == []  # a tree in the inventory alone is no story
+
+    photo = {"id": "123", "captured_at": "2025-05-01T12:00:00", "distance_m": 9, "faces_site": True,
+             "page_url": "https://www.mapillary.com/app/?pKey=123", "credit": "Photo by someone on Mapillary"}
+    monkeypatch.setattr(shortlist, "photos_near", lambda lat, lon, radius: [photo])
+    shortlist.add_photos(sites)
+    text = "\n".join(shortlist.topic_markdown("potholes", sites))
+    assert "## Potholes and road damage" in text and "pothole_repair 1" in text
+    assert '`python -m city_investigator.investigate 123 --question "Was this pothole ever fixed?" --topic potholes --yes --explain`' in text

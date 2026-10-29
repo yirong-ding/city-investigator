@@ -150,3 +150,22 @@ def test_flood_map_layers_show_the_model_and_skip_far_records(store):  # noqa: F
     flood = layers["flood"]["features"]
     assert {(f["properties"]["scenario"], f["properties"]["category"]) for f in flood} == {("moderate_current", 1), ("moderate_current", 2)}
     assert all(f["properties"]["id"] == "stormwater:moderate_current" for f in flood)
+
+
+def test_district_overview_shows_the_last_batch(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(web, "DERIVED_DIR", tmp_path / "derived")
+    assert client.get("/api/batch").status_code == 404
+    run = tmp_path / "runs" / "20261029-110000-123"
+    run.mkdir(parents=True)
+    (run / "result.json").write_text("{}")
+    site = {"topic": "trees", "place": "107 BERKELEY PLACE", "lat": SHED[0], "lon": SHED[1], "photo_id": "123", "run": run.name,
+            "records": 24, "flags": [{"type": "inventory_tree_nearby", "severity": "agreement", "message": "..."}],
+            "explanation": {"answer": "Yes, likely."}}
+    gone = site | {"place": "elsewhere", "run": "20261029-110100-456"}  # its folder was deleted: not shown
+    (tmp_path / "derived").mkdir()
+    (tmp_path / "derived" / "batch.json").write_text(json.dumps({"summary": {"sites": 2}, "sites": [site, gone]}))
+    data = client.get("/api/batch").json()
+    assert data["summary"] == {"sites": 2}
+    [point] = data["sites"]["features"]
+    assert point["properties"]["worst"] == "agreement" and point["properties"]["run"] == run.name
+    assert point["properties"]["label"] == "Street trees" and point["geometry"]["coordinates"] == [SHED[1], SHED[0]]

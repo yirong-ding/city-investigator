@@ -71,7 +71,12 @@ async def segment(api: Any, image_url: str, concept: str) -> ImageSegmentationRe
         metadata={"include_confidence": "true"},
     )
     async with stream, aclosing(lane_events(stream)) as events:
-        return await parse_responses_stream(events, image_segmentation_format()).final_result()
+        result = await parse_responses_stream(events, image_segmentation_format()).final_result()
+        # Read the stream to its end, so no half-read generator is left for the garbage collector
+        # to close later from another thread's event loop.
+        async for _ in events:
+            pass
+        return result
 
 
 def summarize(result: Any, concept: str, size: tuple[int, int]) -> dict[str, Any]:

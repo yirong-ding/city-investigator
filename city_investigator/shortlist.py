@@ -275,7 +275,8 @@ def photo_lines(site: dict[str, Any]) -> list[str]:
 
 def topic_markdown(topic: str, sites: list[dict[str, Any]], sources: list[str] | None = None) -> list[str]:
     spec = TOPICS[topic]
-    years = (spec.lookback_days or 365) // 365
+    days = spec.lookback_days or 365
+    back = f"{days // 365} year{'s' if days >= 730 else ''}" if days >= 365 else f"{days} days"
     lines = [
         "",
         f"## {spec.label}",
@@ -283,7 +284,7 @@ def topic_markdown(topic: str, sites: list[dict[str, Any]], sources: list[str] |
         *[f"- {line}" for line in sources or []],
         "",
         f"Within {spec.radius_m:.0f} m, records from the last {SITE_YEARS} years (and standing records such as inventories). "
-        f"A photo's window is what an investigation of its date looks at: {years} year{'s' if years != 1 else ''} before to a month after.",
+        f"A photo's window is what an investigation of its date looks at: {back} before to a month after.",
         "",
         "| # | Address | Sources | Records | First | Latest | Best photo: date, records in its window | Street View |",
         "|---|---|---|---|---|---|---|---|",

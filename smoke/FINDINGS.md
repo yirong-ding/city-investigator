@@ -239,3 +239,13 @@ Placement check (`python -m smoke.placements`): no sidewalk record came from ano
 - **Bug:** the inventory record nearest the photo (4 m) was a London planetree with structure **Retired**, and the rule flagged it as "likely the tree in the photo". The records tell a replacement story instead: Poor inspection and removal in 2022, stump removal finished 2023-04, a planting work order closed 2023-07, and a standing honeylocust 7 m away. The match now uses the nearest **standing** tree and names a closer removed one; if only removed trees are near, a conflict flag says the tree seen may be a newer planting. (Assumption to confirm against the Parks data dictionary: "Retired" marks the record of a removed tree.)
 - `placements` also showed **pothole work orders: 4,138 saved, 0 placed**: DOT writes `rptdate` as `2019/01/02 00:00:00`, a form the date reader did not know. Fixed; no new download needed.
 - Façade filings (159 of 684) and ramp complaints (16 of 103) that are not placed have no date: e.g. auto-generated "No Report Filed" façade rows.
+
+## First batch run (Oct 29, 2026)
+
+`batch --limit 3` over the shortlist (hosted Muse Spark 1.3, about 20 minutes, $1.84 for the explanations): 26 places, 0 failed, 656 records considered.
+
+- **17 of 26 places** have a conflict or a gap between records, photo and model (flags: 11 conflict, 13 gap, 8 agreement).
+- **243 of 243 claims** passed the evidence check, with no repair round.
+- Muse Spark looked things up 103 times on its own: 75 record reads, 10 building lookups, 6 searches, and **12 times it asked SAM 3.1 to look again** for something new ("sidewalk shed", "orange traffic barrel", "parked car along curb"). Its reading and SAM 3.1 never disagreed.
+- Harmless "Exception ignored ... async generator already executing" messages appeared after some SAM look-agains: half-read response streams were closed later by the garbage collector from another thread's loop. SAM streams are now read to the end, and the batch runs explanations the way the single command does.
+- The page has a **District overview**: every batch place on the map, colored by its worst flag, each opening its full investigation.

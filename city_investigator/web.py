@@ -29,10 +29,11 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from city_investigator import batch
 from city_investigator.explain import explain_run
 from city_investigator.investigate import OUTPUT, USER_UNCERTAINTY_M, investigate_photo, parse_local
 from city_investigator.photo_input import Photo, from_file, from_mapillary
-from city_investigator.settings import ROOT, load_env
+from city_investigator.settings import DERIVED_DIR, ROOT, load_env
 from city_investigator.shortlist import street_view
 from city_investigator.sources import SOURCES, STATE_CATEGORIES
 from city_investigator.store import Store
@@ -311,6 +312,16 @@ def create_app(state: State | None = None) -> FastAPI:
         if job is None:
             raise HTTPException(404, "Unknown job.")
         return StreamingResponse(job.stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+
+    @app.get("/api/batch")
+    def batch_overview() -> dict[str, Any]:
+        """The last batch run: its totals and one point per investigated site."""
+        path = DERIVED_DIR / "batch.json"
+        if not path.is_file():
+            raise HTTPException(404, "No batch run yet: python -m city_investigator.batch")
+        saved = json.loads(path.read_text())
+        sites = [site for site in saved["sites"] if "error" not in site and (OUTPUT / site["run"] / "result.json").is_file()]
+        return {"summary": saved["summary"], "sites": batch.geojson(sites)}
 
     @app.get("/api/runs")
     def runs() -> list[dict[str, Any]]:

@@ -18,7 +18,15 @@
         <label class="saved">Open a saved investigation
           <select id="runs"><option value="">Choose…</option></select>
         </label>
+        <button id="overview" class="secondary" type="button" hidden>District overview</button>
       </header>
+
+      <section class="card" id="overview-card" hidden>
+        <h2>Records against the street, across the district</h2>
+        <p class="hint">Each dot is a place investigated from its best Mapillary photo. Click one to see its flags and open the full investigation.</p>
+        <div id="overview-stats" class="stats"></div>
+        <ul id="overview-list" class="overview-list"></ul>
+      </section>
 
       <section class="card" id="step-photo">
         <h2><span class="num">1</span> Photo</h2>

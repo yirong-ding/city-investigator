@@ -18,6 +18,13 @@ const GROUPS = {
 const ROWS = ['Complaints', 'Permits and licenses', 'Agency actions', 'Sensor floods', 'Rain'];
 const FLOOD = { 1: '#74a9e8', 2: '#1c4fb8', 3: '#0c8599' };
 const SCENARIOS = { moderate_current: "Today's sea levels", moderate_2050: '2050 sea levels' };
+// How a batch site's flags compare the records with the street, worst first.
+const WORST = {
+  conflict: { color: '#c92a2a', name: 'Records and street disagree' },
+  gap: { color: '#e8890c', name: 'A gap in the records' },
+  agreement: { color: '#2b8a3e', name: 'Records and street agree' },
+  none: { color: '#868e96', name: 'No flags' },
+};
 
 const state = {
   map: null, marker: null, photo: null, pin: null, run: null, confirming: false,
@@ -99,6 +106,18 @@ async function initMap() {
       'circle-stroke-width': ['case', lit, 2.5, 1.5],
     },
   });
+  map.addSource('sites', { type: 'geojson', data: empty() });
+  map.addLayer({
+    id: 'sites', type: 'circle', source: 'sites',
+    paint: {
+      'circle-radius': 8,
+      'circle-color': ['match', ['get', 'worst'], ...Object.entries(WORST).flatMap(([key, value]) => [key, value.color]), '#868e96'],
+      'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2,
+    },
+  });
+  map.on('click', 'sites', (event) => sitePopup(event.features[0]));
+  map.on('mouseenter', 'sites', () => { map.getCanvas().style.cursor = 'pointer'; });
+  map.on('mouseleave', 'sites', () => { map.getCanvas().style.cursor = ''; });
   map.on('click', 'records', (event) => openPopup(event.features[0].properties));
   map.on('mouseenter', 'records', () => { map.getCanvas().style.cursor = 'pointer'; });
   map.on('mouseleave', 'records', () => { map.getCanvas().style.cursor = ''; });
@@ -582,10 +601,75 @@ async function investigate() {
   }
 }
 
+// The district overview: every place of the last batch run, colored by its worst flag.
+
+const words = (text) => String(text).replaceAll('_', ' ');
+
+function sitePopup(feature) {
+  const site = typeof feature.properties.flags === 'string'
+    ? { ...feature.properties, flags: JSON.parse(feature.properties.flags) } : feature.properties;
+  const worst = WORST[site.worst] || WORST.none;
+  const body = el('div', { class: 'site-popup' },
+    el('strong', { text: `${site.label}: ${site.place}` }),
+    el('p', {}, el('span', { class: 'swatch', style: `background:${worst.color};display:inline-block;margin-right:6px` }), worst.name),
+    site.flags.length ? el('p', { class: 'meta', text: site.flags.map(words).join(', ') }) : null,
+    site.answer ? el('p', { text: site.answer }) : null,
+    el('button', { type: 'button', class: 'primary', text: 'Open the investigation', onclick: () => { popup.remove(); loadRun(site.run); } }));
+  const popup = new maplibregl.Popup({ offset: 10, maxWidth: '320px' }).setLngLat(feature.geometry.coordinates).setDOMContent(body).addTo(state.map);
+}
+
+function overviewLegend(sites) {
+  const legend = $('legend');
+  const counts = {};
+  for (const site of sites.features) counts[site.properties.worst] = (counts[site.properties.worst] || 0) + 1;
+  legend.replaceChildren(el('h4', { text: 'Places investigated' }),
+    ...Object.entries(WORST).filter(([key]) => counts[key]).map(([key, value]) =>
+      el('div', { class: 'item' }, el('span', { class: 'swatch', style: `background:${value.color}` }), `${value.name} (${counts[key]})`)));
+  legend.hidden = false;
+}
+
+async function showOverview() {
+  const { summary, sites } = await api('/api/batch');
+  const stat = (value, label) => el('div', { class: 'stat' }, el('strong', { text: String(value) }), el('span', { text: label }));
+  const share = summary.claims_kept_share === null ? '-' : `${Math.round(summary.claims_kept_share * 100)}%`;
+  $('overview-stats').replaceChildren(
+    stat(summary.sites, 'places investigated'),
+    stat(summary.sites_with_a_conflict_or_gap, 'with a conflict or a gap'),
+    stat(share, `of ${summary.claims_kept + summary.claims_removed} claims kept after checking`),
+    stat(summary.lookups.check_photo || 0, 'times Muse Spark asked SAM 3.1 to look again'));
+  const order = Object.keys(WORST);
+  const ranked = [...sites.features].sort((a, b) => order.indexOf(a.properties.worst) - order.indexOf(b.properties.worst));
+  $('overview-list').replaceChildren(...ranked.map((feature) => {
+    const site = feature.properties;
+    return el('li', {}, el('button', { type: 'button', class: 'secondary', onclick: () => {
+      state.map?.flyTo({ center: feature.geometry.coordinates, zoom: 16 });
+      if (state.map) sitePopup(feature);
+    } }, el('span', { class: 'swatch', style: `background:${(WORST[site.worst] || WORST.none).color}` }),
+    el('span', {}, el('strong', { text: site.place }), ` · ${site.label}`, site.flags.length ? el('br') : null,
+      site.flags.length ? el('span', { class: 'meta', text: site.flags.map(words).join(', ') }) : null)));
+  }));
+  $('overview-card').hidden = false;
+  $('results').hidden = true;
+  overviewLegend(sites);
+  history.replaceState(null, '', '#overview');
+  if (!state.map) return;
+  for (const source of ['records', 'flood', 'rings']) state.map.getSource(source).setData(empty());
+  state.marker?.remove();
+  state.marker = null;
+  state.map.getSource('sites').setData(sites);
+  if (sites.features.length) {
+    const points = sites.features.map((feature) => feature.geometry.coordinates);
+    const bounds = points.reduce((box, point) => box.extend(point), new maplibregl.LngLatBounds(points[0], points[0]));
+    state.map.fitBounds(bounds, { padding: 50, maxZoom: 15, duration: 700 });
+  }
+}
+
 async function loadRun(name, { waiting = false } = {}) {
   const data = await api(`/api/runs/${encodeURIComponent(name)}`);
   state.run = data;
   state.confirming = false;
+  $('overview-card').hidden = true;
+  state.map?.getSource('sites').setData(empty());
   renderMap(data);
   renderTimeline(data);
   renderAnswer(data, waiting);
@@ -669,6 +753,7 @@ async function init() {
     loadPhoto(form);
   });
   $('runs').addEventListener('change', () => { if ($('runs').value) loadRun($('runs').value); });
+  $('overview').addEventListener('click', () => showOverview().catch((error) => setStatus(error.message, true)));
   let resize;
   window.addEventListener('resize', () => { clearTimeout(resize); resize = setTimeout(() => state.run && renderTimeline(state.run), 150); });
 
@@ -690,7 +775,10 @@ async function init() {
   await initMap();
   const fromLink = new URLSearchParams(location.hash.slice(1)).get('run');
   await refreshRuns(fromLink || '');
+  const overview = await fetch('/api/batch').then((response) => response.ok).catch(() => false);
+  $('overview').hidden = !overview;
   if (fromLink) loadRun(fromLink).catch(() => {});
+  else if (overview && location.hash === '#overview') showOverview().catch(() => {});
 }
 
 init();

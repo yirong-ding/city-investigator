@@ -75,7 +75,7 @@ async def run_job(job: dict[str, Any], store: Store, provider: str, explain: boo
         "flags": [{"type": flag["type"], "severity": flag["severity"], "message": flag["message"]} for flag in result["flags"]],
     }
     if explain:
-        explanation = await asyncio.to_thread(explain_run, run_dir, provider, store)
+        explanation = explain_run(run_dir, provider, store)  # as the investigate command does; sites run one at a time
         entry["explanation"] = {
             "answer": explanation["claims"][0]["text"] if explanation["claims"] else None,
             "claims": len(explanation["claims"]),

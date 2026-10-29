@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 
 
 @dataclass(frozen=True)
@@ -105,6 +106,11 @@ def detect_topic(question: str) -> str | None:
 def in_topic(topic: str, evidence_topic: str, category: str) -> bool:
     """Whether a record belongs to a topic, directly or as a related category."""
     return evidence_topic == topic or category in TOPICS[topic].related
+
+
+def window(topic: str, when: datetime) -> tuple[datetime, datetime]:
+    """The records an investigation of a moment looks at: the topic's lookback until a month after."""
+    return when - timedelta(days=TOPICS[topic].lookback_days or 365), when + timedelta(days=30)
 
 
 def slug(text: str) -> str:

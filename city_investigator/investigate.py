@@ -38,7 +38,7 @@ from city_investigator.settings import ROOT, load_env
 from city_investigator.sheds import ShedChain, build_chains
 from city_investigator.shortlist import street_view
 from city_investigator.store import Coverage, Hit, LookupResult, Store, overlaps
-from city_investigator.topics import TOPICS, detect_topic
+from city_investigator.topics import TOPICS, detect_topic, window
 
 OUTPUT = ROOT / "data" / "private" / "investigations"
 # What SAM 3.1 looks for, per topic. For flooding, "storm drain" finds the street drains that
@@ -221,8 +221,7 @@ def gather_topic(
     store: Store, lat: float, lon: float, radius: float, when: datetime, topic: str
 ) -> tuple[list[Hit], list[Coverage]]:
     """For the newer topics: complaints and agency records from the topic's lookback until a month after."""
-    lookback = timedelta(days=TOPICS[topic].lookback_days or 365)
-    found = store.near(lat, lon, radius, when - lookback, when + timedelta(days=30), topic)
+    found = store.near(lat, lon, radius, *window(topic, when), topic)
     return found.hits, found.coverage
 
 

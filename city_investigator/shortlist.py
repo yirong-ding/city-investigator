@@ -28,7 +28,7 @@ from city_investigator.settings import DERIVED_DIR, load_env
 from city_investigator.sheds import build_chains
 from city_investigator.sources import STATE_CATEGORIES
 from city_investigator.store import Store
-from city_investigator.topics import TOPICS, in_topic
+from city_investigator.topics import TOPICS, in_topic, window
 
 SHED_COMPLAINT_RADIUS_M = 50
 FLOOD_COMPLAINT_RADIUS_M = 150
@@ -159,11 +159,49 @@ def topic_sites(store: Store, topic: str, at: datetime, top: int) -> list[dict[s
     return sites
 
 
+def topic_sources(store: Store, topic: str) -> list[str]:
+    """How many records each source holds for the topic, and its latest date: a source that
+    stops early cannot speak about recent photos."""
+    counts: Counter[str] = Counter()
+    latest: dict[str, datetime] = {}
+    for item in store.evidence:
+        if item.topic != topic:
+            continue
+        counts[item.source] += 1
+        if item.start and (item.source not in latest or item.start > latest[item.source]):
+            latest[item.source] = item.start
+    return [f"{source}: {n:,} records" + (f", latest {day(latest[source])}" if source in latest else "") for source, n in counts.most_common()]
+
+
+def count_window_records(store: Store, site: dict[str, Any], photos: list[dict[str, Any]]) -> None:
+    """How many of the topic's records an investigation of each photo would see, for its date."""
+    counts: dict[str, int] = {}
+    for photo in photos:
+        taken = times.parse(photo.get("captured_at"), "utc")
+        if taken is None:
+            photo["records_in_window"] = 0
+            continue
+        key = taken.date().isoformat()
+        if key not in counts:
+            found = store.near(site["lat"], site["lon"], TOPICS[site["topic"]].radius_m, *window(site["topic"], taken), site["topic"])
+            counts[key] = sum(
+                1 for hit in found.hits
+                if in_topic(site["topic"], hit.evidence.topic, hit.evidence.category) and hit.evidence.category not in STATE_CATEGORIES
+            )
+        photo["records_in_window"] = counts[key]
+
+
+def best_window(site: dict[str, Any]) -> int:
+    return max((photo.get("records_in_window", 0) for photo in site.get("photos") or []), default=0)
+
+
 def best_photos(photos: list[dict[str, Any]], site: dict[str, Any], keep: int = 5) -> list[dict[str, Any]]:
     """Photos most likely to show the site: facing it and close.
 
     For a shed: the closest taken while the permits were valid, plus the closest from
-    before (a "what has changed" pair). For a flood corner: the newest, closest first.
+    before (a "what has changed" pair). For a topic site: those whose date puts the most
+    records in the investigation's window, closest first. For a flood corner: the newest,
+    closest first.
     """
     photos = [photo | {"when": photo_period(photo, site)} for photo in photos]
     facing = [photo for photo in photos if photo["faces_site"]]
@@ -172,10 +210,12 @@ def best_photos(photos: list[dict[str, Any]], site: dict[str, Any], keep: int = 
         during = sorted((p for p in pool if p["when"] == "while shed permits were valid"), key=lambda p: p["distance_m"])
         before = sorted((p for p in pool if p["when"] == "before the current shed permits"), key=lambda p: p["distance_m"])
         return during[: keep - 1] + before[:1] if during else before[:keep]
-    return sorted(pool, key=lambda p: (p["captured_at"] or "", -p["distance_m"]), reverse=True)[:keep]
+    if site.get("topic"):
+        return sorted(pool, key=lambda p: (-p.get("records_in_window", 0), p["distance_m"]))[:keep]
+    return sorted(pool, key=lambda p: ((p["captured_at"] or "")[:10], -p["distance_m"]), reverse=True)[:keep]
 
 
-def add_photos(sites: list[dict[str, Any]], keep: int = 5) -> None:
+def add_photos(sites: list[dict[str, Any]], keep: int = 5, store: Store | None = None) -> None:
     for site in sites:
         try:
             photos = photos_near(site["lat"], site["lon"], PHOTO_RADIUS_M)
@@ -186,12 +226,15 @@ def add_photos(sites: list[dict[str, Any]], keep: int = 5) -> None:
         site["photo_count"] = len(photos)
         site["facing_count"] = sum(1 for photo in photos if photo["faces_site"])
         site["photo_years"] = f"{years[0]} to {years[-1]}" if years else None
+        if store is not None and site.get("topic"):
+            count_window_records(store, site, photos)
         site["photos"] = best_photos(photos, site, keep)
         if site.get("topic") and site["photos"]:
+            # The site, not the camera, is what the question is about: the photo faces it from up to 40 m away.
             question = TOPICS[site["topic"]].example.replace('"', "'")
             site["command"] = (
                 f'python -m city_investigator.investigate {site["photos"][0]["id"]} --question "{question}" '
-                f'--topic {site["topic"]} --yes --explain'
+                f'--topic {site["topic"]} --lat {site["lat"]:.6f} --lon {site["lon"]:.6f} --yes --explain'
             )
 
 
@@ -222,31 +265,39 @@ def photo_lines(site: dict[str, Any]) -> list[str]:
     for photo in site["photos"]:
         facing = {True: ", facing the site", False: ", facing away", None: ""}[photo.get("faces_site")]
         when = (f", {photo['when']}" if photo.get("when") else "") + facing
+        if "records_in_window" in photo:
+            when += f", {photo['records_in_window']} records in its window"
         lines.append(
             f"  - [{(photo['captured_at'] or 'undated')[:10]}, {photo['distance_m']} m away{when}]({photo['page_url']}): {photo['credit']}"
         )
     return lines
 
 
-def topic_markdown(topic: str, sites: list[dict[str, Any]]) -> list[str]:
+def topic_markdown(topic: str, sites: list[dict[str, Any]], sources: list[str] | None = None) -> list[str]:
     spec = TOPICS[topic]
+    years = (spec.lookback_days or 365) // 365
     lines = [
         "",
         f"## {spec.label}",
         "",
-        f"Within {spec.radius_m:.0f} m, records from the last {SITE_YEARS} years (and standing records such as inventories).",
+        *[f"- {line}" for line in sources or []],
         "",
-        "| # | Address | Sources | Records | First | Latest | Street View |",
-        "|---|---|---|---|---|---|---|",
+        f"Within {spec.radius_m:.0f} m, records from the last {SITE_YEARS} years (and standing records such as inventories). "
+        f"A photo's window is what an investigation of its date looks at: {years} year{'s' if years != 1 else ''} before to a month after.",
+        "",
+        "| # | Address | Sources | Records | First | Latest | Best photo: date, records in its window | Street View |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     if not sites:
-        return [*lines, "| - | No records of this topic in the snapshot | | | | | |"]
+        return [*lines, "| - | No records of this topic in the snapshot | | | | | | |"]
     for index, site in enumerate(sites, 1):
         records = ", ".join(f"{category} {n}" for category, n in site["records"].items())
         place = site["address"] or f"{site['lat']:.5f}, {site['lon']:.5f}"
+        best = site.get("photos") or []
+        photo = f"{(best[0]['captured_at'] or 'undated')[:10]}, {best[0].get('records_in_window', '-')}" if best else "-"
         lines.append(
             f"| {index} | {place} | {len(site['sources'])} | {records} | "
-            f"{site['first'] or '-'} | {site['latest'] or '-'} | [view]({site['street_view']}) |"
+            f"{site['first'] or '-'} | {site['latest'] or '-'} | {photo} | [view]({site['street_view']}) |"
         )
     for index, site in enumerate(sites, 1):
         extra = photo_lines(site)
@@ -260,7 +311,7 @@ def topic_markdown(topic: str, sites: list[dict[str, Any]]) -> list[str]:
 
 def to_markdown(
     sheds: list[dict[str, Any]], floods: list[dict[str, Any]], generated: datetime,
-    topics: dict[str, list[dict[str, Any]]] | None = None,
+    topics: dict[str, list[dict[str, Any]]] | None = None, sources: dict[str, list[str]] | None = None,
 ) -> str:
     lines = [
         "# Demo site shortlist",
@@ -302,7 +353,7 @@ def to_markdown(
         if extra:
             lines += ["", f"Photos near flood corner {index} ({site['sensor']}):", *extra]
     for topic, sites in (topics or {}).items():
-        lines += topic_markdown(topic, sites)
+        lines += topic_markdown(topic, sites, (sources or {}).get(topic))
     return "\n".join(lines) + "\n"
 
 
@@ -317,13 +368,20 @@ def main() -> None:
     at = times.now()
     sheds = shed_sites(store, at, args.top)
     floods = flood_sites(store, args.top)
-    topics = {topic: topic_sites(store, topic, at, args.top) for topic in args.topic or NEW_TOPICS}
+    chosen = args.topic or NEW_TOPICS
+    sources = {topic: topic_sources(store, topic) for topic in chosen}
+    topics = {topic: topic_sites(store, topic, at, args.top) for topic in chosen}
     if args.photos:
-        for sites in (sheds, floods, *topics.values()):
-            add_photos(sites)
+        add_photos(sheds)
+        add_photos(floods)
+        # Mapillary photos are years old: rank topic sites again by the records their best photo's date can see.
+        for topic in chosen:
+            candidates = topic_sites(store, topic, at, args.top * 3)
+            add_photos(candidates, store=store)
+            topics[topic] = sorted(candidates, key=lambda site: -best_window(site))[: args.top]
     DERIVED_DIR.mkdir(parents=True, exist_ok=True)
     (DERIVED_DIR / "shortlist.json").write_text(json.dumps({"sheds": sheds, "flood_corners": floods, "topics": topics}, indent=2))
-    markdown = to_markdown(sheds, floods, at, topics)
+    markdown = to_markdown(sheds, floods, at, topics, sources)
     (DERIVED_DIR / "shortlist.md").write_text(markdown, encoding="utf-8")
     print(markdown)
     print(f"Saved to {DERIVED_DIR / 'shortlist.md'}")

@@ -386,10 +386,17 @@ def test_shortlist_finds_topic_sites_with_a_command_for_the_best_photo(store, tm
     assert len(sites) == 1 and sites[0]["records"] == {"pothole_repair": 1} and sites[0]["latest"] == "2025-04-01"
     assert shortlist.topic_sites(loaded, "trees", WHEN, 5) == []  # a tree in the inventory alone is no story
 
-    photo = {"id": "123", "captured_at": "2025-05-01T12:00:00", "distance_m": 9, "faces_site": True,
-             "page_url": "https://www.mapillary.com/app/?pKey=123", "credit": "Photo by someone on Mapillary"}
-    monkeypatch.setattr(shortlist, "photos_near", lambda lat, lon, radius: [photo])
-    shortlist.add_photos(sites)
-    text = "\n".join(shortlist.topic_markdown("potholes", sites))
-    assert "## Potholes and road damage" in text and "pothole_repair 1" in text
-    assert '`python -m city_investigator.investigate 123 --question "Was this pothole ever fixed?" --topic potholes --yes --explain`' in text
+    def photo(pid, taken, distance):
+        return {"id": pid, "captured_at": taken, "distance_m": distance, "faces_site": True,
+                "page_url": f"https://www.mapillary.com/app/?pKey={pid}", "credit": "Photo by someone on Mapillary"}
+
+    # The closer photo was taken two years after the repair, outside a pothole investigation's one-year window.
+    photos = [photo("near", "2027-05-01T12:00:00+00:00", 3), photo("after", "2025-05-01T12:00:00+00:00", 20)]
+    monkeypatch.setattr(shortlist, "photos_near", lambda lat, lon, radius: photos)
+    shortlist.add_photos(sites, store=loaded)
+    assert [(p["id"], p["records_in_window"]) for p in sites[0]["photos"]] == [("after", 1), ("near", 0)]
+    text = "\n".join(shortlist.topic_markdown("potholes", sites, shortlist.topic_sources(loaded, "potholes")))
+    assert "## Potholes and road damage" in text and "pothole_repair 1" in text and "1 records in its window" in text
+    assert "- DOT pothole work orders (closed): 1 records, latest 2025-04-01" in text
+    assert ('`python -m city_investigator.investigate after --question "Was this pothole ever fixed?" --topic potholes '
+            f'--lat {LAT:.6f} --lon {LON:.6f} --yes --explain`') in text

@@ -218,6 +218,7 @@ LICENSES = {
 }
 DINING_LICENSES_START = datetime(2024, 8, 1, tzinfo=timezone.utc)
 TREE_MATCH_M = 8
+REMOVED_TREE = {"retired", "stump"}  # inventory structures with no standing tree
 RAMP_MATCH_M = 15
 
 
@@ -351,20 +352,39 @@ def facade_checks(
 
 
 def tree_checks(observations: list[Evidence], records: list[Evidence], distances: dict[str, float]) -> list[Flag]:
+    """Match a tree in the photo to the inventory: the nearest standing tree within a few meters.
+
+    A removed tree's record (structure Retired or Stump) can be the nearest; it is named so it
+    is not taken for the tree in the photo.
+    """
     trees = [item for item in observations if item.category.startswith("seen_") and "tree" in item.category]
     inventory = sorted(
-        (item for item in records if item.category == "tree_inventory" and item.id in distances),
+        (item for item in records if item.category == "tree_inventory" and distances.get(item.id, TREE_MATCH_M + 1) <= TREE_MATCH_M),
         key=lambda item: distances[item.id],
     )
-    if not trees or not inventory or distances[inventory[0].id] > TREE_MATCH_M:
+    if not trees or not inventory:
         return []
-    nearest = inventory[0]
+    standing = [item for item in inventory if str(item.raw.get("tpstructure") or "").strip().lower() not in REMOVED_TREE]
+    removed = [item for item in inventory if item not in standing and (not standing or distances[item.id] < distances[standing[0].id])]
+
+    def described(item: Evidence) -> str:
+        return f"{distances[item.id]:.0f} m away: {item.summary.removeprefix('Street tree in the Parks inventory: ')}"
+
+    if not standing:
+        return [Flag(
+            "removed_tree_listed", CONFLICT,
+            f"A tree is seen, but the only Parks inventory records within {TREE_MATCH_M} m are of removed trees "
+            f"(nearest {described(removed[0])}). The tree in the photo may be a newer planting the inventory does not "
+            "list, or one farther away.",
+            ids(trees) + [removed[0].id],
+        )]
+    nearest = standing[0]
+    closer = f" A removed tree's record is closer, {described(removed[0])}." if removed else ""
     return [Flag(
         "inventory_tree_nearby", AGREEMENT,
-        f"The Parks inventory lists a tree {distances[nearest.id]:.0f} m from the camera: "
-        f"{nearest.summary.removeprefix('Street tree in the Parks inventory: ')}. It is likely the tree in the photo; "
-        "the photo's direction was not checked.",
-        ids(trees) + [nearest.id],
+        f"The Parks inventory lists a standing tree {described(nearest)}. It is likely the tree in the photo; "
+        f"the photo's direction was not checked.{closer}",
+        ids(trees) + [nearest.id] + ([removed[0].id] if removed else []),
     )]
 
 

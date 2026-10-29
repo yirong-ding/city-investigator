@@ -120,6 +120,11 @@ def test_each_source_reads_its_rows():
     assert closure.category == "street_closure" and license_.address == "1 TEST STREET"
     assert "sidewalk seating compliant: No" in inspection_.summary
     assert to_evidence("pothole_orders", {"defnum": "D2"}) is None  # no date or place: skipped
+    slashed = to_evidence("pothole_orders", {"defnum": "D3", "rptdate": "2019/01/02 00:00:00", "rptclosed": "2019/01/03 00:00:00",
+                                             "the_geom": {"type": "MultiLineString", "coordinates": [[[LON, LAT], [LON + 0.001, LAT]]]}})
+    assert "reported 2019-01-02, closed 2019-01-03" in slashed.summary  # how DOT writes these dates
+    retired = to_evidence("tree_points", {"globalid": "{T9}", "tpstructure": "Retired", "location": {"type": "Point", "coordinates": [LON, LAT]}})
+    assert "structure Retired (Parks retires the record of a tree that was removed)" in retired.summary
 
 
 class Dining:
@@ -296,9 +301,15 @@ def test_new_topic_checks():
     safe_later = record("facade_filings:2", "facade_filing", "facades", WHEN - timedelta(days=30), raw={"filing_status": "SAFE"}, bbl=LOT)
     assert topic_checks("facades", [], [unsafe, safe_later], WHEN) == []  # the latest filing counts
 
-    tree = record("tree_points:T1", "tree_inventory", "trees")
+    tree = record("tree_points:T1", "tree_inventory", "trees", raw={"tpstructure": "Full"})
+    gone = record("tree_points:T0", "tree_inventory", "trees", raw={"tpstructure": "Retired"})
     assert types(topic_checks("trees", [seen("tree", "trees")], [tree], WHEN, {tree.id: 5})) == ["inventory_tree_nearby"]
     assert topic_checks("trees", [seen("tree", "trees")], [tree], WHEN, {tree.id: 20}) == []
+    # A removed tree's record is never taken for the tree in the photo.
+    [both] = topic_checks("trees", [seen("tree", "trees")], [gone, tree], WHEN, {gone.id: 4, tree.id: 7})
+    assert both.type == "inventory_tree_nearby" and both.evidence_ids[-2:] == [tree.id, gone.id] and "removed tree's record is closer, 4 m" in both.message
+    [only_gone] = topic_checks("trees", [seen("tree", "trees")], [gone], WHEN, {gone.id: 4})
+    assert only_gone.type == "removed_tree_listed" and only_gone.severity == "conflict"
 
     ramp = record("ramps:R1", "ramp_survey", "curb_ramps", raw={"ponding": "Yes"})
     assert "ramp_ponding_recorded" in types(topic_checks("curb_ramps", [seen("puddle", "curb_ramps")], [ramp], WHEN, {ramp.id: 4}))

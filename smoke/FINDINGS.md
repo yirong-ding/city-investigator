@@ -231,3 +231,11 @@ Flood demo with the city's flood model loaded (hosted Muse Spark 1.3, 48.7 s, ab
 - **Sidewalk violations (6kbp-uz6m) and tree sidewalk damage (j6v2-6uxq):** `cb` is the bare board number (6), shared by four boroughs, and nothing records the borough. `bblid` is an internal ID, not a BBL. Rows are now matched to district lots by house number and street, in one spelling ("7TH ST." = "7 STREET"); a violation whose cross streets are given must cross a district street, which drops a same-address row in Manhattan.
 
 Placement check (`python -m smoke.placements`): no sidewalk record came from another borough. Of 249 tree damage records at a violation's address, 246 share DOT's lot ID; the 3 that differ are still in the district's ID range (likely re-numbered lots). DOT lot IDs run 253,791 to 284,337 for both datasets, plus a few new lots above 1.19 million at Park Slope addresses; none is near Manhattan's range. Street permits: 28,498 placed by mapped segment, 12,242 by cross streets, 6,784 by house number.
+
+## First street tree run (Oct 29, 2026)
+
+107 Berkeley Place, Mapillary photo of 2024-04-04 (hosted Muse Spark 1.3, 30.9 s, about $0.07): 10 of 10 claims passed, 3 lookups. Muse Spark read the three 311 complaints and quoted their resolutions ("not enough location detail"; "Parks did the work").
+
+- **Bug:** the inventory record nearest the photo (4 m) was a London planetree with structure **Retired**, and the rule flagged it as "likely the tree in the photo". The records tell a replacement story instead: Poor inspection and removal in 2022, stump removal finished 2023-04, a planting work order closed 2023-07, and a standing honeylocust 7 m away. The match now uses the nearest **standing** tree and names a closer removed one; if only removed trees are near, a conflict flag says the tree seen may be a newer planting. (Assumption to confirm against the Parks data dictionary: "Retired" marks the record of a removed tree.)
+- `placements` also showed **pothole work orders: 4,138 saved, 0 placed**: DOT writes `rptdate` as `2019/01/02 00:00:00`, a form the date reader did not know. Fixed; no new download needed.
+- Façade filings (159 of 684) and ramp complaints (16 of 103) that are not placed have no date: e.g. auto-generated "No Report Filed" façade rows.

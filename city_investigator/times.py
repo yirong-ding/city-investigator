@@ -12,11 +12,11 @@ from zoneinfo import ZoneInfo
 from city_investigator.config import TIMEZONE
 
 LOCAL = ZoneInfo(TIMEZONE)
-FORMATS = ("%m/%d/%Y %H:%M:%S", "%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y")
+FORMATS = ("%m/%d/%Y %H:%M:%S", "%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y", "%Y/%m/%d %H:%M:%S", "%Y/%m/%d")
 
 
 def parse(value: object, source_tz: str = "local") -> datetime | None:
-    """Parse ISO or MM/DD/YYYY text; source_tz is "local" (New York) or "utc"."""
+    """Parse ISO, MM/DD/YYYY or YYYY/MM/DD text; source_tz is "local" (New York) or "utc"."""
     if not value or not isinstance(value, str):
         return None
     text = value.strip()

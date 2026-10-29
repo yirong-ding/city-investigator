@@ -298,10 +298,12 @@ def tree_point(row: dict[str, Any], dataset: str, lot: LotFinder) -> Evidence | 
     if not rid or lat is None:
         return None
     species = str(row.get("genusspecies") or "species not recorded").split(" - ")[-1]
+    structure = str(row.get("tpstructure") or "").strip()
     details = [
         f"trunk {row['dbh']} in across" if row.get("dbh") else None,
         f"condition {row['tpcondition']}" if row.get("tpcondition") else None,
-        f"structure {row['tpstructure']}" if row.get("tpstructure") else None,
+        f"structure {structure}" + (" (Parks retires the record of a tree that was removed)" if structure.lower() == "retired" else "")
+        if structure else None,
         f"risk rating {row['riskrating']}" if row.get("riskrating") else None,
     ]
     updated = when(row, "updateddate", "createddate")

@@ -182,23 +182,10 @@ def at_district_address(house: str, street: str, *cross_streets: str) -> Callabl
     return select
 
 
-def projected_center(text: Any) -> tuple[float | None, float | None]:
-    """The center of a WKT geometry given in State Plane feet (or, if small enough, degrees)."""
-    try:
-        middle = shapely.from_wkt(text).centroid if isinstance(text, str) and text.strip() else None
-    except (GEOSException, ValueError, TypeError):
-        return None, None
-    if middle is None or middle.is_empty:
-        return None, None
-    if abs(middle.x) <= 180 and abs(middle.y) <= 90:
-        return middle.y, middle.x
-    return from_state_plane(middle.x, middle.y)
-
-
 def place_permit(row: Row, district: District) -> Row | None:
     """A permit's mapped segment; failing that its house number, or where its cross streets meet
     its street. Saved with the point and how it was found; None outside the district."""
-    lat, lon = projected_center(row.get("wkt"))
+    lat, lon = center(row, "wkt")
     located_by = "street segment"
     if lat is None and (lot := district.at_address(row.get("permithousenumber"), row.get("onstreetname"))):
         _, lat, lon = lot
@@ -216,8 +203,13 @@ def place_permit(row: Row, district: District) -> Row | None:
 # Reading rows
 
 
+# New York City in State Plane feet, with room to spare: values here are not degrees.
+STATE_PLANE_X, STATE_PLANE_Y = (800_000, 1_200_000), (50_000, 350_000)
+
+
 def center(row: dict[str, Any], *columns: str) -> tuple[float | None, float | None]:
-    """The center of a row's geometry: a GeoJSON or WKT value in one of the columns, or lat/lon fields."""
+    """The center of a row's geometry: a GeoJSON or WKT value in one of the columns, in degrees
+    or State Plane feet, or lat/lon fields."""
     for column in columns:
         value = row.get(column)
         try:
@@ -234,9 +226,13 @@ def center(row: dict[str, Any], *columns: str) -> tuple[float | None, float | No
                 continue
         except (ValueError, TypeError, GEOSException):
             continue
-        if not geometry.is_empty:
-            middle = geometry.centroid
+        if geometry.is_empty:
+            continue
+        middle = geometry.centroid
+        if abs(middle.x) <= 180 and abs(middle.y) <= 90:
             return middle.y, middle.x
+        if STATE_PLANE_X[0] <= middle.x <= STATE_PLANE_X[1] and STATE_PLANE_Y[0] <= middle.y <= STATE_PLANE_Y[1]:
+            return from_state_plane(middle.x, middle.y)
     return point(row, ("latitude", "longitude"))
 
 

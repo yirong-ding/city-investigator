@@ -19,7 +19,7 @@ from city_investigator.checks import topic_checks
 from city_investigator.evidence import Evidence, classify_complaint
 from city_investigator.socrata import SocrataError
 from city_investigator.geo import from_state_plane
-from city_investigator.sources import SOURCES, address_key, street_key
+from city_investigator.sources import SOURCES, address_key, center, street_key
 from city_investigator.store import FOUND, NO_COVERAGE, PARTIAL, Store
 from city_investigator.topics import TOPICS, detect_topic
 
@@ -151,6 +151,12 @@ SEGMENT_DEG = (40.666295666, -73.982077706)
 def test_state_plane_feet_become_degrees():
     assert from_state_plane(*SEGMENT_FT) == pytest.approx(SEGMENT_DEG, abs=1e-7)
     assert from_state_plane(1_000_000, 200_000) == pytest.approx((40.715616479, -73.943185068), abs=1e-7)
+    # Any source's geometry may come in feet, as GeoJSON or WKT; numbers that are neither are skipped.
+    feet = {"type": "Point", "coordinates": list(SEGMENT_FT)}
+    assert center({"geometry": feet}, "geometry") == pytest.approx(SEGMENT_DEG, abs=1e-7)
+    assert center({"wkt": f"POINT ({SEGMENT_FT[0]} {SEGMENT_FT[1]})"}, "wkt") == pytest.approx(SEGMENT_DEG, abs=1e-7)
+    assert center({"geometry": {"type": "Point", "coordinates": [5_000_000, 9]}, "location": {"type": "Point", "coordinates": [LON, LAT]}},
+                  "geometry", "location") == (LAT, LON)
 
 
 def test_street_names_are_compared_in_one_spelling():

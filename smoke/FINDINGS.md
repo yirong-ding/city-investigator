@@ -252,7 +252,7 @@ Placement check (`python -m smoke.placements`): no sidewalk record came from ano
 
 Audit of the batch's 24 conflict and gap flags, by hand:
 
-- **Held up (13):** both repeat-report patterns and record gaps (9 `repeat_reports`, the 180 Kane permit-chain gap), the Carroll St/4th Av flood pair (a nor'easter on April 3 to 4, 2024: 311 reports, no sensor reading, Central Park's wettest hour 0.25 in), 431 Hicks (shed permit valid, photo 12 m away facing it, no shed), 433 Dean (structure seen, no permit in 2018).
+- **Held up (13):** both repeat-report patterns and record gaps (9 `repeat_reports`, the 180 Kane permit-chain gap), the Carroll St/4th Av flood pair (311 flood reports around the photo's date, April 4, 2024, no sensor reading, Central Park's wettest hour 0.25 in), 431 Hicks (shed permit valid, photo 12 m away facing it, no shed), 433 Dean (structure seen, no permit in 2018).
 - **Rules fixed (6):**
   - 180 Kane `permit_without_structure`: every photo there faced away. The batch now skips photos that face away.
   - 473 14 St `removed_tree_listed`: the stump record was updated in 2026, years after the 2019 photo. Removal now counts only if recorded before the photo; a tree removed later is matched as the photo's tree, with "since recorded as removed".

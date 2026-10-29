@@ -5,6 +5,7 @@ Rows are made up but use the city's column names, as listed by city_investigator
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 
@@ -417,3 +418,54 @@ def test_shortlist_finds_topic_sites_with_a_command_for_the_best_photo(store, tm
     assert "- DOT pothole work orders (closed): 1 records, latest 2025-04-01" in text
     assert ('`python -m city_investigator.investigate after --question "Was this pothole ever fixed?" --topic potholes '
             f'--lat {LAT:.6f} --lon {LON:.6f} --yes --explain`') in text
+
+
+def test_batch_investigates_shortlisted_sites_once_and_adds_them_up(store, tmp_path, monkeypatch):  # noqa: F811
+    from city_investigator import batch
+    from city_investigator import explain as explain_module
+
+    write_sources(tmp_path)
+    loaded = Store.load(tmp_path)
+
+    async def fake_sam(photo, topic, guard, progress=print):
+        return photo.jpeg, 0, [("pothole", sam_result(BOX_LINE)), ("cracked asphalt", sam_result()), ("manhole cover", sam_result())]
+
+    fetched = []
+
+    def fake_photo(photo_id, token):
+        fetched.append(photo_id)
+        return photo_at(40.0, -74.0, WHEN)  # moved to the site by the batch
+
+    def fake_explain(run_dir, provider, store):
+        return {"claims": [{"text": "The pothole is still there after the work order closed."}], "dropped": [], "repairs": 0,
+                "tool_calls": [{"tool": "check_photo"}], "models_disagree": [], "seconds": 1.0, "estimated_cost_usd": 0.05}
+
+    monkeypatch.setattr(inv, "run_sam", fake_sam)
+    monkeypatch.setattr(inv, "OUTPUT", tmp_path / "runs")
+    monkeypatch.setattr(meta, "LEDGER", tmp_path / "spend.json")
+    monkeypatch.setattr(batch, "from_mapillary", fake_photo)
+    monkeypatch.setattr(explain_module, "explain_run", fake_explain)
+    monkeypatch.setenv("MAPILLARY_TOKEN", "test")
+
+    shortlist = {
+        "sheds": [],
+        "flood_corners": [{"sensor": "Test St/Example Av", "lat": LAT, "lon": LON, "photos": []}],  # no photo: skipped
+        "topics": {"potholes": [{"address": "1 TEST STREET", "lat": LAT, "lon": LON, "photos": [{"id": "123"}]}]},
+    }
+    jobs = batch.plan(shortlist, None, 5)
+    assert [(job["topic"], job["place"], job["photo_id"]) for job in jobs] == [("potholes", "1 TEST STREET", "123")]
+    folder = tmp_path / "derived"
+    entries = asyncio.run(batch.run(jobs, loaded, "meta", True, folder))
+    assert entries[0]["photo_date"] == "2025-06-01" and "closed_but_still_seen" in [flag["type"] for flag in entries[0]["flags"]]
+
+    saved = json.loads((folder / "batch.json").read_text())
+    totals = saved["summary"]
+    assert totals["sites"] == 1 and totals["claims_kept_share"] == 1.0 and totals["lookups"] == {"check_photo": 1}
+    assert totals["sites_with_a_conflict_or_gap"] == 1
+    point = json.loads((folder / "batch.geojson").read_text())["features"][0]
+    assert point["geometry"]["coordinates"] == [LON, LAT] and point["properties"]["worst"] in ("conflict", "gap")
+    text = (folder / "batch.md").read_text()
+    assert "Claims kept after checking: 1 of 1 (100%)" in text and "## Conflicts and gaps" in text
+
+    asyncio.run(batch.run(jobs, loaded, "meta", True, folder))  # a second run pays for nothing already done
+    assert fetched == ["123"]

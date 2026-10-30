@@ -11,6 +11,7 @@
   --model: #6d3fc8;
   --hypothesis: #a85a06;
   --no_coverage: #a3203f;
+  --proposal: #2b7a3d;
   --agreement: #2b7a3d;
   --conflict: #b42318;
   --gap: #a85a06;
@@ -122,6 +123,9 @@ button.secondary { flex: 0 0 auto; }
 .kind-model { --kind: var(--model); }
 .kind-hypothesis { --kind: var(--hypothesis); }
 .kind-no_coverage { --kind: var(--no_coverage); border-left-style: dashed; }
+.kind-proposal { --kind: var(--proposal); background: #eef5ef; }
+.proposals-head { margin: 14px 0 2px; font-size: 0.95rem; }
+.proposals-note { margin: 0 0 8px; }
 .cites { display: flex; flex-wrap: wrap; gap: 4px; }
 .chip {
   font-size: 0.72rem; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line);

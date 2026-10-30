@@ -268,3 +268,7 @@ Audit of the batch's 24 conflict and gap flags, by hand:
 - New evidence for flooding: the median ground under the buildings within 40 m against those within 200 m. Two flags: `low_ground` (agreement: flooding recurs and the spot is 2 ft or more lower) and `flooding_on_higher_ground` (conflict: it recurs although the spot is 2 ft or more higher, so drains rather than terrain).
 - The 3D view draws everything at true scale: a 36 in flood is a short column beside 12 m row houses. Zoom to the corner for the shot rather than exaggerating heights.
 - Valdrada places sidewalk sheds at random (about 1 in 80 building fronts, `compile.mjs`), so its view is linked as the place, never shown as evidence. Its city download may need Hugging Face access while the dataset is private. Its online demo is the "light edition" (`tools/lite/build_lite.mjs`): only the tiles around a few Manhattan showcase places, so it cannot show Brooklyn; the page embeds a copy running on this computer instead.
+
+## What could be done (Oct 30, 2026)
+
+The explanation ends with up to three proposals. The channels are a fixed list per topic (`actions.py`): 311 reports under the complaint wording the district's own records use (checked against `config.COMPLAINTS` when the module loads), the community board, and DEP's Green Infrastructure Program for flooding. A proposal must cite one channel and the finding it answers, and may not promise a result. No phone numbers, links or programs beyond that list, so nothing can be invented.

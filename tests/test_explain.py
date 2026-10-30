@@ -97,6 +97,31 @@ def test_claims_must_cite_existing_evidence_of_the_right_type(sidewalk_result):
     assert "not one of" in problems("fact", [permit])[0]
 
 
+def test_proposals_name_a_real_channel_answer_the_evidence_and_promise_nothing(sidewalk_result):
+    known = ex.evidence_list(sidewalk_result)
+    permit = next(eid for eid, item in known.items() if item.get("summary", "").startswith("DOB permit"))
+    shed_report = "action:311_sidewalk_shed_pipe"
+    assert known[shed_report]["type"] == "action" and "'Sidewalk Shed/Pipe Scafford" in known[shed_report]["summary"]
+    assert "action:community_board" in known and "action:green_infrastructure" not in known  # only this topic's channels
+
+    def problems(kind, ids, text="A neighbor could ask the community board to follow up."):
+        return ex.claim_problems({"text": text, "kind": kind, "evidence_ids": ids}, known)
+
+    assert problems("proposal", ["action:community_board", "flag:permit_matches_structure"]) == []
+    assert "must cite action" in problems("proposal", [permit])[0]  # no channel
+    assert "evidence it answers" in problems("proposal", ["action:community_board"])[0]  # answers nothing
+    assert "not promise" in problems("proposal", [shed_report, permit], "Filing this will fix the shed.")[0]
+    assert "only a proposal" in problems("record", [permit, "action:community_board"])[0]
+
+    four = claims(*[("The community board could follow this up.", "proposal", ["action:community_board", permit])] * 4)
+    kept, dropped, _ = ex.check_claims(four, known, [])
+    assert len(kept) == 3 and dropped[0]["problems"] == ["at most 3 proposals"]
+    text = ex.render({"question": "Q", "model": "m", "claims": kept, "flags": [], "models_disagree": [], "dropped": [],
+                      "warnings": [], "tool_calls": [], "evidence": {}, "photo_credit": None, "repairs": 0, "model_calls": 1,
+                      "estimated_cost_usd": 0.01})
+    assert "## What could be done" in text and text.count("**PROPOSAL**") == 3
+
+
 def test_claims_are_read_through_code_fences():
     answer = "```json\n" + claims(("A.", "record", ["r1"])) + "\n```"
     assert ex.parse_claims(answer) == [{"text": "A.", "kind": "record", "evidence_ids": ["r1"]}]

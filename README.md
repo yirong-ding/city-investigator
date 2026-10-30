@@ -115,11 +115,14 @@ Muse Spark gets the question, the blurred photo and every piece of evidence with
 
 It answers in short claims, each labeled observation, record, model, hypothesis or no_coverage and citing evidence IDs, including the IDs its tool calls returned. The report lists what it checked.
 
+It ends with up to three **proposals: what could be done**. Each must cite one of the topic's real channels, listed in `city_investigator/actions.py` (a 311 report under the exact wording the city's own records use, Brooklyn Community Board 6, and for flooding DEP's Green Infrastructure Program), and the evidence it answers. Muse Spark is asked to fit a proposal to what was already tried: when the same complaint was closed again and again, raising it with the community board rather than filing it once more.
+
 Code checks every claim before it is shown:
 
 - A claim that cites an ID that does not exist is dropped.
 - A label must fit what it cites: observations cite only the photo, records cite records or coverage notes and never the photo, no_coverage claims cite a coverage note. A claim that combines the photo and records must be labeled a hypothesis.
 - Every flag, and every source with no coverage, must be mentioned.
+- A proposal must cite a channel and the evidence it answers, may not promise a result ("will fix"), and there are at most three. No other claim may cite a channel.
 - When Muse Spark says the photo shows something SAM 3.1 looked for and did not find (say, "street drains" when SAM found no catch basin), the disagreement is reported. Either model can be wrong, so the claim stays and the reader is told to check the photo.
 
 When a check fails, Muse Spark gets one chance to fix its answer, and the better of the two answers is kept. Flags always come from the rules, never from the model. The run folder gets `explanation.md` and `explanation.json`, including the dropped claims and the tool calls.

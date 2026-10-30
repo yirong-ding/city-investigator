@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from city_investigator import times
+from city_investigator.actions import action_items
 from city_investigator.config import DROPPED_FIELDS, RAIN_STATION
 from city_investigator.evidence import Evidence
 from city_investigator.investigate import MIN_CONFIDENCE, OUTPUT, Progress, say
@@ -50,13 +51,14 @@ from city_investigator.segment import segment, summarize
 from city_investigator.settings import load_env
 from city_investigator.store import Coverage, Hit, Store
 
-KINDS = ["observation", "record", "model", "hypothesis", "no_coverage"]
+KINDS = ["observation", "record", "model", "hypothesis", "no_coverage", "proposal"]
 LABELS = {
     "observation": "OBSERVED",
     "record": "RECORD",
     "model": "MODEL",
     "hypothesis": "INFERRED",
     "no_coverage": "NO COVERAGE",
+    "proposal": "PROPOSAL",
 }
 # Each label must cite at least one piece of evidence of these types.
 NEEDS = {
@@ -65,7 +67,12 @@ NEEDS = {
     "model": {"model"},
     "hypothesis": {"photo", "record", "model", "coverage", "flag"},
     "no_coverage": {"coverage"},
+    "proposal": {"action"},
 }
+FINDINGS = {"photo", "record", "model", "coverage", "flag"}  # what a proposal must also cite: what it answers
+MAX_PROPOSALS = 3
+# A proposal may say what could help; it may not promise a result.
+PROMISE = r"\b(will|would|guarantees?|ensures?)\s+(definitely\s+)?(fix|solve|stop|prevent|end|eliminate|resolve|guarantee)\b"
 MAX_TOOL_TURNS = 5
 MAX_PHOTO_CHECKS = 4
 MAX_REPAIRS = 1
@@ -97,6 +104,8 @@ storefront names yourself and cite "photo".
 - hypothesis: an inference that connects or explains evidence. Say "may" or "likely". Cite every id it rests on.
 - no_coverage: what the data cannot tell here, because a source does not cover this place or time or \
 cannot see it. Cite the coverage id.
+- proposal: what the resident or the community board could do next. Cite exactly the action id of the \
+channel (only actions in the evidence list exist) and the evidence the step answers.
 
 Rules:
 - Cite only ids from the evidence list or from tool results. Never invent ids, dates, numbers or addresses.
@@ -107,7 +116,11 @@ reported (anyone can file one, so do not say who), not how bad a problem was. A 
 to pond in a design storm, not what happened on any day.
 - If the photo was taken at a different time than the question asks about, it shows the place, not that moment.
 - Say nothing about who owns or runs a building, and do not assign blame. Do not describe people in the photo.
-- Use the local dates given. Write 6 to 12 claims.
+- Use the local dates given. Write 6 to 12 claims, then up to 3 proposals.
+- Proposals come last. Fit each to what the evidence shows was already tried: when the same problem was \
+reported and closed again and again, another identical report is less useful than raising it with the \
+community board. Say what a step could do ("could ask", "could help"), never that it will fix the problem. \
+Propose nothing for a problem the evidence does not show.
 
 Use the tools to check what matters before you answer:
 - Before saying the photo shows something specific that matters to the answer (a drain, a sign, a ramp, \
@@ -377,6 +390,8 @@ def evidence_list(result: dict[str, Any]) -> dict[str, dict[str, Any]]:
             "summary": flag["message"],
             "rests_on": [eid for eid in flag["evidence_ids"] if eid in known],
         })
+    for item in action_items(result["topic"]):
+        add(item)
     return known
 
 
@@ -611,6 +626,12 @@ def claim_problems(claim: Any, known: dict[str, dict[str, Any]]) -> list[str]:
         problems.append("an observation may cite only the photo; a claim that combines photo and records is a hypothesis")
     if kind == "record" and "photo" in types:
         problems.append("a record claim may not cite the photo; a claim that combines photo and records is a hypothesis")
+    if kind != "proposal" and "action" in types:
+        problems.append("only a proposal may cite an action")
+    if kind == "proposal" and not types & FINDINGS:
+        problems.append("a proposal must also cite the evidence it answers")
+    if kind == "proposal" and re.search(PROMISE, claim["text"], re.IGNORECASE):
+        problems.append("a proposal may say what could help, not promise a result")
     return problems
 
 
@@ -622,8 +643,13 @@ def check_claims(
     if claims is None:
         return [], [], [f"The answer was not a claims list; it starts {answer[:80]!r}."]
     kept, dropped = [], []
+    proposals = 0
     for claim in claims:
         problems = claim_problems(claim, known)
+        if not problems and claim.get("kind") == "proposal":
+            proposals += 1
+            if proposals > MAX_PROPOSALS:
+                problems = [f"at most {MAX_PROPOSALS} proposals"]
         if problems:
             dropped.append({"claim": claim, "problems": problems})
         else:
@@ -783,10 +809,14 @@ def render(explanation: dict[str, Any]) -> str:
         f"Written by Muse Spark ({explanation['model']}). Every claim is labeled and checked against the evidence it cites.",
         "",
     ]
-    lines += [
-        f"- **{LABELS[claim['kind']]}** {claim['text']} `{', '.join(claim['evidence_ids'])}`"
-        for claim in explanation["claims"]
-    ]
+    def line(claim: dict[str, Any]) -> str:
+        return f"- **{LABELS[claim['kind']]}** {claim['text']} `{', '.join(claim['evidence_ids'])}`"
+
+    lines += [line(claim) for claim in explanation["claims"] if claim["kind"] != "proposal"]
+    proposals = [claim for claim in explanation["claims"] if claim["kind"] == "proposal"]
+    if proposals:
+        lines += ["", "## What could be done", "", "Proposals from Muse Spark, each tied to the evidence it answers. Not advice from the city.", ""]
+        lines += [line(claim) for claim in proposals]
     if explanation["flags"]:
         lines += ["", "## Flags (from rules, not the model)", ""]
         lines += [f"- **{flag['severity'].upper()}** {flag['message']}" for flag in explanation["flags"]]

@@ -4,7 +4,7 @@
 
 const BASEMAP = 'https://tiles.openfreemap.org/styles/positron';
 const DISTRICT = [-73.995, 40.675];
-const KINDS = { observation: 'Observed', record: 'Record', model: 'Model', hypothesis: 'Inferred', no_coverage: 'No coverage' };
+const KINDS = { observation: 'Observed', record: 'Record', model: 'Model', hypothesis: 'Inferred', no_coverage: 'No coverage', proposal: 'Proposal' };
 const GROUPS = {
   complaint: { name: '311 complaint', color: '#d9480f', row: 'Complaints' },
   permit: { name: 'Permit or license', color: '#5f3dc4', row: 'Permits and licenses' },
@@ -423,6 +423,8 @@ function shortName(id, item) {
     street_closures: 'street closure',
     dining_licenses: 'dining license',
     dining_inspections: 'dining inspection',
+    elevation: 'ground elevation',
+    action: rest.startsWith('311_') ? `311: ${rest.slice(4).replaceAll('_', ' ')}` : rest.replaceAll('_', ' '),
   };
   return names[prefix] || id;
 }
@@ -449,18 +451,27 @@ function renderAnswer(data, waiting) {
     return;
   }
   const evidence = allEvidence(data);
-  const list = el('ol', { class: 'claims' });
-  for (const claim of explanation.claims) {
-    const cites = el('div', { class: 'cites' });
-    for (const id of claim.evidence_ids) {
-      cites.append(el('button', { type: 'button', class: 'chip', title: evidence.get(id)?.summary || id, text: shortName(id, evidence.get(id)), onclick: () => focusEvidence(id) }));
+  const claimList = (claims) => {
+    const list = el('ol', { class: 'claims' });
+    for (const claim of claims) {
+      const cites = el('div', { class: 'cites' });
+      for (const id of claim.evidence_ids) {
+        cites.append(el('button', { type: 'button', class: 'chip', title: evidence.get(id)?.summary || id, text: shortName(id, evidence.get(id)), onclick: () => focusEvidence(id) }));
+      }
+      const item = el('li', { class: `claim kind-${claim.kind}`, tabindex: '0' },
+        el('span', { class: 'kind', text: KINDS[claim.kind] || claim.kind }), el('p', { text: claim.text }), cites);
+      hoverable(item, claim.evidence_ids);
+      list.append(item);
     }
-    const item = el('li', { class: `claim kind-${claim.kind}`, tabindex: '0' },
-      el('span', { class: 'kind', text: KINDS[claim.kind] || claim.kind }), el('p', { text: claim.text }), cites);
-    hoverable(item, claim.evidence_ids);
-    list.append(item);
+    return list;
+  };
+  tab.append(claimList(explanation.claims.filter((claim) => claim.kind !== 'proposal')));
+  const proposals = explanation.claims.filter((claim) => claim.kind === 'proposal');
+  if (proposals.length) {
+    tab.append(el('h4', { class: 'proposals-head', text: 'What could be done' }),
+      el('p', { class: 'meta proposals-note', text: 'Proposals from Muse Spark, each tied to a real channel and the evidence it answers. Not advice from the city.' }),
+      claimList(proposals));
   }
-  tab.append(list);
   if (explanation.models_disagree?.length) {
     tab.append(el('div', { class: 'box warn' }, el('strong', { text: 'Muse Spark and SAM 3.1 disagree' }),
       ...explanation.models_disagree.map((note) => el('p', { text: note }))));

@@ -33,6 +33,8 @@ Conflicts between sources and gaps in the records are flagged, not smoothed over
 
 NYC Open Data (311 service requests, PLUTO property data, Department of Buildings permits), FloodNet street flooding sensors (New York University and The City University of New York), hourly rain at the Central Park weather station, and the [NYC Stormwater Flood Maps](https://data.cityofnewyork.us/d/9i7c-xyvv) from the Mayor's Office of Climate and Environmental Justice. Sources are credited in the app.
 
+[Building footprints](https://data.cityofnewyork.us/d/5zhs-2jue) give each building's roof height and the ground elevation it stands on. A flood investigation compares the ground at the pin with the buildings within 200 m: a spot lower than its blocks collects their runoff; one higher than them that still floods points to drains rather than terrain.
+
 The flood maps are the **model** evidence: where the city's models expect rain to pond (4 in or deeper, over at least a quarter acre) in a moderate storm (2.13 in/hr), with today's sea levels and with 2050 sea levels. Checks compare them with what was recorded: flooding the model also expects, or flooding the model does not map.
 
 City Investigator is a research aid, **not an official determination**. For life-threatening flooding call 911; to report a problem use 311.
@@ -77,6 +79,8 @@ python -m city_investigator.web   # opens http://127.0.0.1:8000
 3. **Question:** ask, choose Muse Spark 1.3 or Muse Spark Open, and press Investigate.
 
 Each step streams in as it happens: SAM 3.1 looking for each object, the records gathered, the checks, and every lookup Muse Spark makes. The map and timeline fill in as soon as the records are gathered; the answer follows. Hover a claim to light up the evidence it cites on the map and the timeline; click a citation to jump to it. The map shades the city's flood model around the pin, with today's and 2050 sea levels.
+
+**3D:** the 3D button tilts the map toward the photo's compass heading and raises the buildings to their measured roof heights; the buildings the flags or the answer cite are orange. For flooding, the city model's water stands at its depth class and the nearby sensor's deepest measured flood is a column of that height, at true scale. **District overview** maps every place of the last batch run, colored by its worst flag. The Photo tab links the spot in [Valdrada](https://github.com/mkturkcan/valdrada), a 3D city of New York built from public records (third-party, MIT license): its online demo or a copy on this computer, standing where the photo was taken. Some of Valdrada's street details are generated, so it shows the place, not the evidence.
 
 Saved investigations open from the list at the top without any API calls. The page runs on this computer only, with the same keys, snapshots and spend cap as the command line.
 
@@ -138,7 +142,7 @@ Never commit `.env`; it is listed in `.gitignore`.
 
 ## Prior work disclosure
 
-Background research and planning were done before the hackathon in a separate private repository. All code in this repository is written during the event.
+Background research and planning were done before the hackathon in a separate private repository. All code in this repository is written during the event. Valdrada, linked from the page, is a separate open-source project by Mehmet Kerem Turkcan; none of its code is included here.
 
 ## License
 

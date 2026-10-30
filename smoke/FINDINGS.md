@@ -261,3 +261,10 @@ Audit of the batch's 24 conflict and gap flags, by hand:
   - 515 6 St `facade_unsafe_unprotected`: the UNSAFE filing was for 501 6 St, about 30 m off. It now needs the building within 20 m of the pin.
 - **Reworded (4 `reported_not_seen`):** complaints closed before the photo and nothing visible now read as agreement ("consistent with a repair"); only complaints still open on the photo's date are a conflict.
 - The summary now counts places by kind (records and photo disagree; reported again and again; other gaps; agree) instead of one "conflict or gap" number that mixed patterns with mismatches.
+
+## 3D map and ground elevation (Oct 30, 2026)
+
+- Building footprints (`5zhs-2jue`, the record Valdrada also builds from) give roof heights and ground elevations (feet, NAVD88). A missing ground elevation is stored as 0 and is skipped.
+- New evidence for flooding: the median ground under the buildings within 40 m against those within 200 m. Two flags: `low_ground` (agreement: flooding recurs and the spot is 2 ft or more lower) and `flooding_on_higher_ground` (conflict: it recurs although the spot is 2 ft or more higher, so drains rather than terrain).
+- The 3D view draws everything at true scale: a 36 in flood is a short column beside 12 m row houses. Zoom to the corner for the shot rather than exaggerating heights.
+- Valdrada places sidewalk sheds at random (about 1 in 80 building fronts, `compile.mjs`), so its view is linked as the place, never shown as evidence. Its city download may need Hugging Face access while the dataset is private; its browser demo is a Hugging Face Space.

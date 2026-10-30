@@ -26,7 +26,17 @@ const WORST = {
   none: { color: '#868e96', name: 'No flags' },
 };
 
+// Valdrada, the 3D city of NYC (github.com/mkturkcan/valdrada): its browser demo on Hugging Face, a copy running on
+// this computer (its dev server's address), and the projection of its world (client/src/shared/geo.js), x east and
+// z south in meters.
+const VALDRADA = { online: 'https://mehmetkeremturkcan-valdrada.hf.space', local: 'http://127.0.0.1:5219' };
+const VALDRADA_ORIGIN = { lat: 40.7831, lon: -73.9712 };
+// Depth classes of the city's flood model, drawn in 3D at a height inside each class.
+const FLOOD_HEIGHT_M = { 1: 0.2, 2: 0.45, 3: 0.3 };
+const EXTRUSIONS = ['buildings3d', 'flood3d', 'gauge3d'];
+
 const state = {
+  view3d: false, mode: 'run',
   map: null, marker: null, photo: null, pin: null, run: null, confirming: false,
   scenario: 'moderate_current', source: null, nextEvent: 0, started: 0, timer: null, highlighted: [],
 };
@@ -115,6 +125,49 @@ async function initMap() {
       'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2,
     },
   });
+  // 3D: the city's footprints at their roof heights, the flood model's water at its depth class and the
+  // sensor's deepest flood as a column; around the district overview, the basemap's buildings.
+  map.addSource('buildings', { type: 'geojson', data: empty() });
+  map.addSource('gauge', { type: 'geojson', data: empty() });
+  const hidden = { visibility: 'none' };
+  if (map.getSource('openmaptiles')) {
+    map.addLayer({
+      id: 'osm3d', type: 'fill-extrusion', source: 'openmaptiles', 'source-layer': 'building', layout: hidden,
+      paint: {
+        'fill-extrusion-color': '#d7d5cf', 'fill-extrusion-opacity': 0.85,
+        'fill-extrusion-height': ['coalesce', ['get', 'render_height'], 8],
+        'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], 0],
+      },
+    }, 'records');
+  }
+  map.addLayer({
+    id: 'buildings3d', type: 'fill-extrusion', source: 'buildings', layout: hidden,
+    paint: {
+      'fill-extrusion-color': ['case', ['get', 'cited'], '#d9480f', ['get', 'measured'], '#cfccc4', '#e6e3dc'],
+      'fill-extrusion-height': ['get', 'height'], 'fill-extrusion-opacity': 0.9,
+    },
+  }, 'records');
+  map.addLayer({
+    id: 'flood3d', type: 'fill-extrusion', source: 'flood', layout: hidden,
+    filter: ['==', ['get', 'scenario'], state.scenario],
+    paint: {
+      'fill-extrusion-color': ['match', ['get', 'category'], 1, FLOOD[1], 2, FLOOD[2], 3, FLOOD[3], '#888'],
+      'fill-extrusion-height': ['match', ['get', 'category'], ...Object.entries(FLOOD_HEIGHT_M).flatMap(([k, v]) => [Number(k), v]), 0.3],
+      'fill-extrusion-opacity': 0.6,
+    },
+  }, 'records');
+  map.addLayer({
+    id: 'gauge3d', type: 'fill-extrusion', source: 'gauge', layout: hidden,
+    paint: { 'fill-extrusion-color': '#0b3d91', 'fill-extrusion-height': ['get', 'height'], 'fill-extrusion-opacity': 0.95 },
+  }, 'records');
+  map.addControl({
+    onAdd() {
+      const box = el('div', { class: 'maplibregl-ctrl maplibregl-ctrl-group' });
+      box.append(el('button', { type: 'button', id: 'toggle-3d', class: 'view-toggle', text: '3D', title: 'Tilt the map and raise the buildings', onclick: () => { state.view3d = !state.view3d; apply3d(true); } }));
+      return box;
+    },
+    onRemove() {},
+  }, 'top-right');
   map.on('click', 'sites', (event) => sitePopup(event.features[0]));
   map.on('mouseenter', 'sites', () => { map.getCanvas().style.cursor = 'pointer'; });
   map.on('mouseleave', 'sites', () => { map.getCanvas().style.cursor = ''; });
@@ -203,11 +256,26 @@ function renderLegend(data) {
       for (const scenario of scenarios) {
         toggle.append(el('button', {
           type: 'button', class: scenario === state.scenario ? 'on' : '', text: SCENARIOS[scenario] || scenario,
-          onclick: () => { state.scenario = scenario; state.map?.setFilter('flood', ['==', ['get', 'scenario'], scenario]); renderLegend(data); },
+          onclick: () => {
+            state.scenario = scenario;
+            for (const layer of ['flood', 'flood3d']) state.map?.setFilter(layer, ['==', ['get', 'scenario'], scenario]);
+            renderLegend(data);
+          },
         }));
       }
       legend.append(toggle);
     }
+  }
+  const buildings = data.map.buildings?.features || [];
+  if (buildings.length) {
+    legend.append(el('h4', { text: 'In 3D' }),
+      el('div', { class: 'item' }, el('span', { class: 'swatch area', style: 'background:#cfccc4' }), 'Buildings at their measured roof heights (city footprints)'));
+    if (buildings.some((feature) => feature.properties.cited)) {
+      legend.append(el('div', { class: 'item' }, el('span', { class: 'swatch area', style: 'background:#d9480f' }), 'A building the flags or the answer cite'));
+    }
+  }
+  for (const column of data.map.gauge?.features || []) {
+    legend.append(el('div', { class: 'item' }, el('span', { class: 'swatch area', style: 'background:#0b3d91' }), `Column: ${column.properties.label}`));
   }
   legend.append(el('div', { class: 'item meta' }, el('span', { class: 'swatch', style: 'background:#0f5c63' }), `Photo pin; dashed ring: ${data.map.pin.radius_m} m searched`));
   legend.hidden = false;
@@ -219,11 +287,46 @@ function renderMap(data) {
   if (!state.map) return;
   state.map.getSource('records').setData(data.map.records);
   state.map.getSource('flood').setData(data.map.flood);
-  state.map.setFilter('flood', ['==', ['get', 'scenario'], state.scenario]);
+  state.map.getSource('buildings').setData(data.map.buildings || empty());
+  state.map.getSource('gauge').setData(data.map.gauge || empty());
+  for (const layer of ['flood', 'flood3d']) state.map.setFilter(layer, ['==', ['get', 'scenario'], state.scenario]);
   setPin(pin.lat, pin.lon, false, pin.uncertainty_m, pin.radius_m);
   const ring = circle(pin.lat, pin.lon, pin.radius_m * 1.25, 'fit').geometry.coordinates[0];
   const bounds = ring.reduce((box, point) => box.extend(point), new maplibregl.LngLatBounds(ring[0], ring[0]));
-  state.map.fitBounds(bounds, { padding: 30, maxZoom: 18.5, duration: 700 });
+  state.map.fitBounds(bounds, { padding: 30, maxZoom: 18.5, duration: 700, ...view3dCamera(data.map.heading_deg) });
+  apply3d(false);
+}
+
+// 3D: which extrusions show in each mode, and the camera tilt. Looking along the photo's compass heading puts the
+// buildings the camera saw in front of the viewer.
+
+function view3dCamera(heading) {
+  return state.view3d ? { pitch: 60, bearing: typeof heading === 'number' ? heading : -20 } : { pitch: 0, bearing: 0 };
+}
+
+function apply3d(move) {
+  const map = state.map;
+  if (!map) return;
+  const show = (layer, on) => map.getLayer(layer) && map.setLayoutProperty(layer, 'visibility', on ? 'visible' : 'none');
+  for (const layer of EXTRUSIONS) show(layer, state.view3d && state.mode === 'run');
+  show('osm3d', state.view3d && state.mode === 'overview');
+  show('flood', !state.view3d);
+  $('toggle-3d')?.classList.toggle('on', state.view3d);
+  $('toggle-3d') && ($('toggle-3d').textContent = state.view3d ? '2D' : '3D');
+  if (move) map.easeTo({ ...view3dCamera(state.mode === 'run' ? state.run?.map?.heading_deg : null), duration: 800 });
+}
+
+// Valdrada: the same spot in the 3D city, standing at eye height and facing the photo's direction.
+
+function valdradaLink(map, base) {
+  const { lat, lon } = map.pin;
+  const metersPerDegLon = 111320 * Math.cos((VALDRADA_ORIGIN.lat * Math.PI) / 180);
+  const x = (lon - VALDRADA_ORIGIN.lon) * metersPerDegLon;
+  const z = -(lat - VALDRADA_ORIGIN.lat) * 111132;
+  const yaw = typeof map.heading_deg === 'number' ? (-map.heading_deg * Math.PI) / 180 : 0;  // yaw 0 looks north, turning left
+  const query = new URLSearchParams({ x: x.toFixed(1), z: z.toFixed(1), y: '1.7', rel: '1', yaw: yaw.toFixed(3), pitch: '0', hud: '0' });
+  if (state.run?.result?.topic === 'flooding') query.set('rain', '1');
+  return `${base}/?${query}`;
 }
 
 // Highlighting: a claim or flag lights up the evidence it cites, on the map and the timeline.
@@ -408,7 +511,12 @@ function renderPhoto(data) {
     el('p', {}, el('strong', { text: 'Seen: ' }), result.observations.map((item) => item.summary.replace('The photo shows ', '')).join('; ') || 'nothing the question is about'),
     result.not_seen.length ? el('p', {}, el('strong', { text: 'Not found: ' }), result.not_seen.join(', ')) : null,
     el('p', { class: 'meta', text: `Taken ${photo.taken_local} New York time. Faces and license plates ${photo.faces_and_plates}.` }),
-    photo.credit ? el('p', { class: 'meta' }, photo.page_url ? el('a', { href: photo.page_url, target: '_blank', rel: 'noopener', text: photo.credit }) : photo.credit) : null);
+    photo.credit ? el('p', { class: 'meta' }, photo.page_url ? el('a', { href: photo.page_url, target: '_blank', rel: 'noopener', text: photo.credit }) : photo.credit) : null,
+    el('p', { class: 'meta' }, 'See this spot in Valdrada, the 3D city of New York: ',
+      el('a', { href: valdradaLink(data.map, VALDRADA.online), target: '_blank', rel: 'noopener', text: 'online demo' }), ' or ',
+      el('a', { href: valdradaLink(data.map, VALDRADA.local), target: '_blank', rel: 'noopener', text: 'on this computer' }),
+      '. Its streets are built from public records, but some details such as sidewalk sheds are placed at random, '
+      + 'so it shows the place, not the evidence.'));
 }
 
 function renderSources(data) {
@@ -652,6 +760,8 @@ async function showOverview() {
   $('results').hidden = true;
   overviewLegend(sites);
   history.replaceState(null, '', '#overview');
+  state.mode = 'overview';
+  apply3d(false);
   if (!state.map) return;
   for (const source of ['records', 'flood', 'rings']) state.map.getSource(source).setData(empty());
   state.marker?.remove();
@@ -660,7 +770,7 @@ async function showOverview() {
   if (sites.features.length) {
     const points = sites.features.map((feature) => feature.geometry.coordinates);
     const bounds = points.reduce((box, point) => box.extend(point), new maplibregl.LngLatBounds(points[0], points[0]));
-    state.map.fitBounds(bounds, { padding: 50, maxZoom: 15, duration: 700 });
+    state.map.fitBounds(bounds, { padding: 50, maxZoom: 15, duration: 700, ...view3dCamera(null) });
   }
 }
 
@@ -670,6 +780,7 @@ async function loadRun(name, { waiting = false } = {}) {
   state.confirming = false;
   $('overview-card').hidden = true;
   state.map?.getSource('sites').setData(empty());
+  state.mode = 'run';
   renderMap(data);
   renderTimeline(data);
   renderAnswer(data, waiting);

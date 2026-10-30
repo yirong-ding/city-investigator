@@ -185,6 +185,9 @@ a { color: var(--accent); }
 .site-popup p { margin: 4px 0; }
 .site-popup strong { display: block; padding-right: 16px; }
 
+.view-toggle { font-weight: 700; width: 36px; }
+.view-toggle.on { background: #0f5c63; color: #fff; }
+
 .legend {
   position: absolute; left: 12px; top: 12px; max-width: 260px;
   background: rgba(255, 255, 255, 0.95); border: 1px solid var(--line); border-radius: 8px;

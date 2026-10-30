@@ -327,7 +327,7 @@ function valdradaLink(map, base) {
   // Light settings, for a look at one place: Valdrada's low tier (600 m of full detail), far view to 5 km instead of 13,
   // no traffic or pedestrians (their models are the heaviest download), and a 5 s wait for the landmarks module.
   // fly=1: Valdrada's fly camera, the one that reads y relative to its own ground (rel=1); its default drone takes y
-  // as height above sea level, which put the eye under the street in low-lying Gowanus.
+  // as height above sea level, so 1.7 m can sit at or under the street where the ground is a few meters up.
   const query = new URLSearchParams({
     x: x.toFixed(1), z: z.toFixed(1), y: '1.7', rel: '1', fly: '1', yaw: yaw.toFixed(3), pitch: '0', hud: '0',
     tier: 'low', macro: '5000', nosim: '1', lmwait: '5',

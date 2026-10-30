@@ -48,6 +48,22 @@ def check_mapillary() -> str:
     return f"token rejected (HTTP {response.status_code}): copy the Client Token, not the Client Secret"
 
 
+def list_models() -> str:
+    """The model IDs this key can call on the Meta Model API: which Meta models the project could use."""
+    key = os.environ.get("MODEL_API_KEY")
+    if not key:
+        return "no key set"
+    base = os.environ.get("META_BASE_URL") or "https://api.meta.ai/v1"
+    try:
+        response = requests.get(f"{base}/models", headers={"Authorization": f"Bearer {key}"}, timeout=20)
+    except requests.RequestException as error:
+        return f"unreachable ({type(error).__name__})"
+    if not response.ok:
+        return f"HTTP {response.status_code}"
+    ids = sorted(str(item.get("id")) for item in response.json().get("data", []))
+    return "\n".join(f"  {model}" for model in ids) or "  none listed"
+
+
 def main() -> None:
     load_env()
     print("Keys")
@@ -62,6 +78,7 @@ def main() -> None:
             status = f"unreachable ({type(error).__name__})"
         print(f"  {label:28} {status}")
     print(f"\nMapillary token: {check_mapillary()}")
+    print(f"\nModels on the Meta Model API:\n{list_models()}")
 
 
 if __name__ == "__main__":

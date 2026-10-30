@@ -49,7 +49,8 @@ from city_investigator.evidence import classify_complaint, norm_bbl
 from city_investigator.geo import to_float
 from city_investigator.settings import SNAPSHOT_DIR, load_env
 from city_investigator.socrata import Socrata, SocrataError
-from city_investigator.sources import SOURCES, District, address_key, street_key
+from city_investigator.buildings import FOOTPRINTS_DATASET, slim
+from city_investigator.sources import SOURCES, District, address_key, polygon, street_key
 
 IEM_URL = "https://mesonet.agron.iastate.edu/cgi-bin/request/asos.py"
 ARCGIS_PAGE = 1000
@@ -187,6 +188,16 @@ def plan() -> list[Step]:
             ],
         ),
         *source_steps(),
+        # Roof heights for the 3D map and ground elevations for the flood checks, around the district's lots.
+        Step(
+            "building_footprints",
+            FOOTPRINTS_DATASET,
+            lambda done: [
+                f"intersects(the_geom, '{polygon(district_box(done))}')",
+                "within_box(the_geom, {}, {}, {}, {})".format(*district_box(done)),
+            ],
+            select=lambda row, done: slim(row),
+        ),
     ]
 
 

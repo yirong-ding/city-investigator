@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import math
 import os
 import re
 import threading
@@ -31,6 +32,7 @@ from pydantic import BaseModel
 
 from city_investigator import batch
 from city_investigator.explain import explain_run
+from city_investigator.geo import distance_m
 from city_investigator.investigate import OUTPUT, USER_UNCERTAINTY_M, investigate_photo, parse_local
 from city_investigator.photo_input import Photo, from_file, from_mapillary
 from city_investigator.settings import DERIVED_DIR, ROOT, load_env
@@ -45,6 +47,7 @@ PHOTO_TYPES = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"}
 RUN_FILES = {"photo.jpg", "overlay.png"}
 MAP_HALF_M = 400  # flood model shown within this distance of the pin
 MAP_MAX_M = 1000  # records farther than this (the Central Park rain gauge) stay off the map
+GAUGE_HALF_M = 1.5  # the 3D column showing a sensor's deepest measured flood
 KEEPALIVE_S = 15
 
 DEMOS = [
@@ -187,8 +190,8 @@ def map_layers(result: dict[str, Any], explanation: dict[str, Any] | None, store
         rid, rlat, rlon = record["id"], record.get("lat"), record.get("lon")
         if rid in points or rlat is None or rlon is None or record.get("kind", record.get("type")) == "model":
             continue
-        if (record.get("distance_m") or 0) > MAP_MAX_M:
-            continue
+        if (record.get("distance_m") or 0) > MAP_MAX_M or record.get("category") == "ground_elevation":
+            continue  # the ground comparison describes the area around the pin, not a point
         start = record.get("start") or {}
         end = record.get("end") or {}
         points[rid] = {
@@ -209,11 +212,42 @@ def map_layers(result: dict[str, Any], explanation: dict[str, Any] | None, store
     if store is not None and result["topic"] == "flooding":
         for flood_map in store.flood_maps:
             flood += flood_map.around(lat, lon, MAP_HALF_M)
+    buildings = store.buildings.features(lat, lon, MAP_HALF_M, cited_buildings(result, explanation)) if store else None
     return {
         "pin": {"lat": lat, "lon": lon, "uncertainty_m": location["uncertainty_m"], "radius_m": result["radius_m"]},
+        "heading_deg": result["photo"].get("heading_deg"),
         "records": {"type": "FeatureCollection", "features": list(points.values())},
         "flood": {"type": "FeatureCollection", "features": flood},
+        "buildings": buildings or {"type": "FeatureCollection", "features": []},
+        "gauge": gauge(result, store, lat, lon),
     }
+
+
+def cited_buildings(result: dict[str, Any], explanation: dict[str, Any] | None) -> set[str]:
+    """BINs and BBLs of the records the flags and the answer rest on, so the 3D map can mark those buildings."""
+    cited = {eid for flag in result.get("flags", []) for eid in flag.get("evidence_ids", [])}
+    cited |= {eid for claim in (explanation or {}).get("claims", []) for eid in claim.get("evidence_ids", [])}
+    records = [*result["records"], *((explanation or {}).get("evidence") or {}).values()]
+    return {value for record in records if record.get("id") in cited for value in (record.get("bin"), record.get("bbl")) if value}
+
+
+def gauge(result: dict[str, Any], store: Store | None, lat: float, lon: float) -> dict[str, Any]:
+    """The deepest flood a nearby FloodNet sensor measured, as a column of that height at the sensor."""
+    deepest = ((result.get("recurrence") or {}).get("floodnet") or {}).get("deepest_in")
+    sensors = [
+        sensor for sensor in (store.sensors if store else [])
+        if sensor.lat is not None and sensor.lon is not None and distance_m(lat, lon, sensor.lat, sensor.lon) <= result["radius_m"]
+    ]
+    if not deepest or not sensors:
+        return {"type": "FeatureCollection", "features": []}
+    sensor = min(sensors, key=lambda item: distance_m(lat, lon, item.lat, item.lon))
+    half_lat, half_lon = GAUGE_HALF_M / 110_574, GAUGE_HALF_M / (111_320 * math.cos(math.radians(sensor.lat)))
+    ring = [[sensor.lon + dx * half_lon, sensor.lat + dy * half_lat] for dx, dy in ((-1, -1), (1, -1), (1, 1), (-1, 1), (-1, -1))]
+    return {"type": "FeatureCollection", "features": [{
+        "type": "Feature",
+        "geometry": {"type": "Polygon", "coordinates": [ring]},
+        "properties": {"height": round(float(deepest) * 0.0254, 2), "label": f"{sensor.name}: deepest flood measured, {deepest} in"},
+    }]}
 
 
 def run_folder(name: str) -> Path:

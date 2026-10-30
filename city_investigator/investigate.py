@@ -28,7 +28,8 @@ from pathlib import Path
 from typing import Any
 
 from city_investigator import times
-from city_investigator.checks import Flag, flood_checks, sidewalk_checks, topic_checks
+from city_investigator.buildings import SOURCE as GROUND_SOURCE
+from city_investigator.checks import Flag, flood_checks, ground_checks, sidewalk_checks, topic_checks
 from city_investigator.evidence import Evidence, day
 from city_investigator.geo import distance_m
 from city_investigator.meta import PROVIDERS, SpendGuard, data_url, env_float, meta_client
@@ -37,7 +38,7 @@ from city_investigator.segment import blur_regions, draw_overlay, segment, summa
 from city_investigator.settings import ROOT, load_env
 from city_investigator.sheds import ShedChain, build_chains
 from city_investigator.shortlist import street_view
-from city_investigator.store import Coverage, Hit, LookupResult, Store, overlaps
+from city_investigator.store import FOUND, NO_COVERAGE, Coverage, Hit, LookupResult, Store, overlaps
 from city_investigator.topics import TOPICS, detect_topic, window
 
 OUTPUT = ROOT / "data" / "private" / "investigations"
@@ -381,6 +382,18 @@ async def investigate_photo(
             observations, [hit.evidence for hit in hits], rain_before, sensor_state, photo.taken_at, when, model_state,
             peak[1] if peak else None,
         )
+        ground = store.buildings.ground_here(photo.lat, photo.lon)
+        if ground:
+            hits.append(Hit(ground, 0.0))
+            coverage.append(Coverage(GROUND_SOURCE, FOUND, ground.summary))
+        else:
+            coverage.append(Coverage(
+                GROUND_SOURCE, NO_COVERAGE,
+                "Not downloaded: run python -m city_investigator.snapshot --only building_footprints."
+                if "building_footprints" not in store.loaded else "Too few buildings with a ground elevation around the pin.",
+            ))
+        recurring = [f"recurrence:{key}" for key in ("floodnet", "street_flood_complaints") if rec[key]["recurring"]]
+        flags += ground_checks(ground, recurring)
         extra["recurrence"] = rec
         extra["rain_in_24h_before"] = rain_before
         if peak:

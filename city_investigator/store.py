@@ -18,6 +18,7 @@ from typing import Any
 import requests
 
 from city_investigator import times
+from city_investigator.buildings import Buildings
 from city_investigator.config import RAIN_STATION
 from city_investigator.evidence import (
     Evidence,
@@ -118,6 +119,7 @@ class Store:
         loaded: set[str],
         floodnet_retrieved: datetime | None = None,
         flood_maps: list[FloodMap] | None = None,
+        buildings: Buildings | None = None,
     ) -> None:
         self.evidence = evidence
         self.lots = lots
@@ -128,6 +130,7 @@ class Store:
         self.loaded = loaded
         self.floodnet_retrieved = floodnet_retrieved
         self.flood_maps = flood_maps or []
+        self.buildings = buildings or Buildings([])
 
     @classmethod
     def load(cls, folder: Path = SNAPSHOT_DIR) -> Store:
@@ -206,7 +209,13 @@ class Store:
             loaded.add("stormwater")
             flood_maps = [FloodMap.from_dict(scenario) for scenario in stormwater["scenarios"]]
 
-        return cls(evidence, lots, sensors, rain, periods, loaded, floodnet_retrieved, flood_maps)
+        buildings = Buildings([])
+        footprints = read("building_footprints")
+        if footprints:
+            loaded.add("building_footprints")
+            buildings = Buildings.from_rows(footprints["rows"])
+
+        return cls(evidence, lots, sensors, rain, periods, loaded, floodnet_retrieved, flood_maps, buildings)
 
     # Lookups
 

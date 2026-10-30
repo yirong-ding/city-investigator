@@ -144,8 +144,12 @@ def test_flood_map_layers_show_the_model_and_skip_far_records(store):  # noqa: F
             {"id": "stormwater:moderate_current", "kind": "model", "category": "modeled_flooding", "summary": "m",
              "lat": CORNER[0], "lon": CORNER[1], "distance_m": 0},
         ],
+        "recurrence": {"floodnet": {"deepest_in": 35.94}},
     }
     layers = web.map_layers(result, None, store)
+    [column] = layers["gauge"]["features"]  # the sensor's deepest flood, as a column of that height
+    assert column["properties"]["height"] == 0.91 and "35.94 in" in column["properties"]["label"]
+    assert layers["buildings"]["features"] == []  # no footprints downloaded in this store
     assert [f["properties"]["id"] for f in layers["records"]["features"]] == ["floodnet:s1:x"]
     flood = layers["flood"]["features"]
     assert {(f["properties"]["scenario"], f["properties"]["category"]) for f in flood} == {("moderate_current", 1), ("moderate_current", 2)}

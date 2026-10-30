@@ -38,6 +38,7 @@ class Photo:
     license: str | None = None
     page_url: str | None = None
     already_blurred: bool = False
+    heading_deg: float | None = None  # the camera's compass direction, when the source records it
 
     def describe(self) -> dict[str, Any]:
         return {
@@ -56,6 +57,7 @@ class Photo:
             "license": self.license,
             "page_url": self.page_url,
             "faces_and_plates": "blurred by Mapillary" if self.already_blurred else "blurred here",
+            "heading_deg": self.heading_deg,
         }
 
 
@@ -79,6 +81,8 @@ def from_mapillary(photo_id: str, token: str) -> Photo:
         license=LICENSE,
         page_url=f"https://www.mapillary.com/app/?pKey={photo_id}",
         already_blurred=True,
+        heading_deg=next((float(value) for value in (meta.get("computed_compass_angle"), meta.get("compass_angle"))
+                          if isinstance(value, (int, float))), None),
     )
 
 

@@ -305,6 +305,31 @@ def topic_checks(
     return flags
 
 
+LOW_GROUND_FT = 2.0  # a difference in ground this large decides where runoff goes on a city block
+
+
+def ground_checks(ground: Evidence | None, recurring: list[str]) -> list[Flag]:
+    """Does the terrain explain recurring flooding? recurring holds the recurrence evidence IDs that say it recurs."""
+    if ground is None or not recurring:
+        return []
+    difference = float(ground.raw["difference_ft"])
+    if difference <= -LOW_GROUND_FT:
+        return [Flag(
+            "low_ground", AGREEMENT,
+            f"Flooding recurs here, and the ground is {-difference:.1f} ft lower than under the buildings within 200 m: "
+            "runoff from the surrounding blocks flows toward this spot.",
+            [ground.id, *recurring],
+        )]
+    if difference >= LOW_GROUND_FT:
+        return [Flag(
+            "flooding_on_higher_ground", CONFLICT,
+            f"Flooding recurs here although the ground is {difference:.1f} ft higher than under the buildings within 200 m. "
+            "The terrain does not explain it; blocked or overloaded drains and sewers may.",
+            [ground.id, *recurring],
+        )]
+    return []
+
+
 def license_checks(
     topic: str, seen: list[Evidence], what: str, records: list[Evidence], when: datetime, distances: dict[str, float]
 ) -> list[Flag]:

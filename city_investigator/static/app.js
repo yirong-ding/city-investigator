@@ -26,10 +26,10 @@ const WORST = {
   none: { color: '#868e96', name: 'No flags' },
 };
 
-// Valdrada, the 3D city of NYC (github.com/mkturkcan/valdrada): its browser demo on Hugging Face, a copy running on
-// this computer (its dev server's address), and the projection of its world (client/src/shared/geo.js), x east and
-// z south in meters.
-const VALDRADA = { online: 'https://mehmetkeremturkcan-valdrada.hf.space', local: 'http://127.0.0.1:5219' };
+// Valdrada, the 3D city of NYC (github.com/mkturkcan/valdrada), running on this computer: its dev server's address
+// and the projection of its world (client/src/shared/geo.js), x east and z south in meters. Its online demo is a
+// light edition holding only a few Manhattan places, so it cannot show the district.
+const VALDRADA = 'http://127.0.0.1:5219';
 const VALDRADA_ORIGIN = { lat: 40.7831, lon: -73.9712 };
 // Depth classes of the city's flood model, drawn in 3D at a height inside each class.
 const FLOOD_HEIGHT_M = { 1: 0.2, 2: 0.45, 3: 0.3 };
@@ -512,11 +512,10 @@ function renderPhoto(data) {
     result.not_seen.length ? el('p', {}, el('strong', { text: 'Not found: ' }), result.not_seen.join(', ')) : null,
     el('p', { class: 'meta', text: `Taken ${photo.taken_local} New York time. Faces and license plates ${photo.faces_and_plates}.` }),
     photo.credit ? el('p', { class: 'meta' }, photo.page_url ? el('a', { href: photo.page_url, target: '_blank', rel: 'noopener', text: photo.credit }) : photo.credit) : null,
-    el('p', { class: 'meta' }, 'See this spot in Valdrada, the 3D city of New York: ',
-      el('a', { href: valdradaLink(data.map, VALDRADA.online), target: '_blank', rel: 'noopener', text: 'online demo' }), ' or ',
-      el('a', { href: valdradaLink(data.map, VALDRADA.local), target: '_blank', rel: 'noopener', text: 'on this computer' }),
-      '. Its streets are built from public records, but some details such as sidewalk sheds are placed at random, '
-      + 'so it shows the place, not the evidence.'));
+    el('p', { class: 'meta' },
+      el('a', { href: valdradaLink(data.map, VALDRADA), target: '_blank', rel: 'noopener', text: 'See this spot in Valdrada' }),
+      ', the 3D city of New York, when it runs on this computer. Its streets are built from public records, but some '
+      + 'details such as sidewalk sheds are placed at random, so it shows the place, not the evidence.'));
 }
 
 function renderSources(data) {
@@ -761,6 +760,8 @@ async function showOverview() {
   overviewLegend(sites);
   history.replaceState(null, '', '#overview');
   state.mode = 'overview';
+  showStage('map');
+  $('show-valdrada').disabled = true;
   apply3d(false);
   if (!state.map) return;
   for (const source of ['records', 'flood', 'rings']) state.map.getSource(source).setData(empty());
@@ -774,6 +775,21 @@ async function showOverview() {
   }
 }
 
+// The stage shows the map or, for an open investigation, the same spot in Valdrada running on this computer.
+
+function showStage(view) {
+  if (view === 'valdrada' && !state.run) return;
+  document.querySelector('.stage').dataset.view = view;
+  for (const button of document.querySelectorAll('.stage-switch button')) button.classList.toggle('on', button.dataset.view === view);
+  if (view === 'valdrada') {
+    const link = valdradaLink(state.run.map, VALDRADA);
+    if ($('valdrada-frame').getAttribute('src') !== link) $('valdrada-frame').setAttribute('src', link);  // loads only when shown
+    $('valdrada-tab').href = link;
+  } else {
+    state.map?.resize();
+  }
+}
+
 async function loadRun(name, { waiting = false } = {}) {
   const data = await api(`/api/runs/${encodeURIComponent(name)}`);
   state.run = data;
@@ -781,6 +797,8 @@ async function loadRun(name, { waiting = false } = {}) {
   $('overview-card').hidden = true;
   state.map?.getSource('sites').setData(empty());
   state.mode = 'run';
+  $('show-valdrada').disabled = false;
+  $('show-valdrada').title = 'This spot in Valdrada, a 3D city of New York';
   renderMap(data);
   renderTimeline(data);
   renderAnswer(data, waiting);
@@ -789,6 +807,7 @@ async function loadRun(name, { waiting = false } = {}) {
   renderSources(data);
   $('results').hidden = false;
   history.replaceState(null, '', `#run=${encodeURIComponent(name)}`);
+  if (document.querySelector('.stage').dataset.view === 'valdrada') showStage('valdrada');  // follow the new spot
 }
 
 // Bringing in a photo
@@ -865,6 +884,7 @@ async function init() {
   });
   $('runs').addEventListener('change', () => { if ($('runs').value) loadRun($('runs').value); });
   $('overview').addEventListener('click', () => showOverview().catch((error) => setStatus(error.message, true)));
+  for (const button of document.querySelectorAll('.stage-switch button')) button.addEventListener('click', () => showStage(button.dataset.view));
   let resize;
   window.addEventListener('resize', () => { clearTimeout(resize); resize = setTimeout(() => state.run && renderTimeline(state.run), 150); });
 

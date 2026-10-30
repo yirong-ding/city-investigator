@@ -166,7 +166,18 @@ a { color: var(--accent); }
 
 /* Map and timeline */
 .stage { position: relative; display: grid; grid-template-rows: 1fr 210px; min-width: 0; }
-.map { position: relative; min-height: 0; }
+.map { position: relative; min-height: 0; grid-row: 1; grid-column: 1; }
+.timeline { grid-row: 2; }
+.stage-switch { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 4; margin: 0; }
+.stage-switch button:disabled { opacity: 0.5; cursor: not-allowed; }
+.valdrada { grid-row: 1; grid-column: 1; position: relative; display: none; min-height: 0; background: #1b1b1b; }
+.stage[data-view="valdrada"] .valdrada { display: block; }
+.stage[data-view="valdrada"] .map, .stage[data-view="valdrada"] .legend { visibility: hidden; }
+.valdrada iframe { width: 100%; height: 100%; border: 0; display: block; }
+.valdrada-note {
+  position: absolute; left: 8px; right: 8px; bottom: 8px; margin: 0; padding: 6px 10px; border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92); font-size: 0.78rem; line-height: 1.35;
+}
 .map-missing { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); padding: 24px; text-align: center; }
 .pin {
   /* A ring, so records at the same spot stay visible under it. */

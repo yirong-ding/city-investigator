@@ -324,7 +324,12 @@ function valdradaLink(map, base) {
   const x = (lon - VALDRADA_ORIGIN.lon) * metersPerDegLon;
   const z = -(lat - VALDRADA_ORIGIN.lat) * 111132;
   const yaw = typeof map.heading_deg === 'number' ? (-map.heading_deg * Math.PI) / 180 : 0;  // yaw 0 looks north, turning left
-  const query = new URLSearchParams({ x: x.toFixed(1), z: z.toFixed(1), y: '1.7', rel: '1', yaw: yaw.toFixed(3), pitch: '0', hud: '0' });
+  // Light settings, for a look at one place: Valdrada's low tier (600 m of full detail), far view to 5 km instead of 13,
+  // no traffic or pedestrians (their models are the heaviest download), and a 5 s wait for the landmarks module.
+  const query = new URLSearchParams({
+    x: x.toFixed(1), z: z.toFixed(1), y: '1.7', rel: '1', yaw: yaw.toFixed(3), pitch: '0', hud: '0',
+    tier: 'low', macro: '5000', nosim: '1', lmwait: '5',
+  });
   if (state.run?.result?.topic === 'flooding') query.set('rain', '1');
   return `${base}/?${query}`;
 }

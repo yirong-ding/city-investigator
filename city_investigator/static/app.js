@@ -332,7 +332,12 @@ function valdradaLink(map, base) {
     x: x.toFixed(1), z: z.toFixed(1), y: '1.7', rel: '1', fly: '1', yaw: yaw.toFixed(3), pitch: '0', hud: '0',
     tier: 'low', macro: '5000', nosim: '1', lmwait: '5',
   });
-  if (state.run?.result?.topic === 'flooding') query.set('rain', '1');
+  if (state.run?.result?.topic === 'flooding') {
+    query.set('rain', '1');
+    // The flood model's water and the sensor's deepest reading, drawn by City Investigator's add-on to Valdrada
+    // (python -m city_investigator.valdrada_flood); without the add-on Valdrada ignores it.
+    query.set('flood', `${location.origin}/api/runs/${encodeURIComponent(state.run.name)}/flood3d.json?scenario=${state.scenario}`);
+  }
   return `${base}/?${query}`;
 }
 

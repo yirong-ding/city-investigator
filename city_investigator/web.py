@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -48,6 +48,8 @@ RUN_FILES = {"photo.jpg", "overlay.png"}
 MAP_HALF_M = 400  # flood model shown within this distance of the pin
 MAP_MAX_M = 1000  # records farther than this (the Central Park rain gauge) stay off the map
 GAUGE_HALF_M = 1.5  # the 3D column showing a sensor's deepest measured flood
+# Depths drawn for the flood model's classes (4 in to 1 ft; 1 ft or deeper; future high tides), as on the page's 3D map.
+FLOOD_DEPTH_M = {1: 0.2, 2: 0.45, 3: 0.3}
 KEEPALIVE_S = 15
 
 DEMOS = [
@@ -246,7 +248,10 @@ def gauge(result: dict[str, Any], store: Store | None, lat: float, lon: float) -
     return {"type": "FeatureCollection", "features": [{
         "type": "Feature",
         "geometry": {"type": "Polygon", "coordinates": [ring]},
-        "properties": {"height": round(float(deepest) * 0.0254, 2), "label": f"{sensor.name}: deepest flood measured, {deepest} in"},
+        "properties": {
+            "height": round(float(deepest) * 0.0254, 2), "label": f"{sensor.name}: deepest flood measured, {deepest} in",
+            "lon": sensor.lon, "lat": sensor.lat,
+        },
     }]}
 
 
@@ -382,6 +387,31 @@ def create_app(state: State | None = None) -> FastAPI:
             record["group"] = group(record)
         result.setdefault("topic_label", TOPICS[result["topic"]].label if result["topic"] in TOPICS else result["topic"])
         return {"name": name, "result": result, "explanation": explanation, "map": map_layers(result, explanation, state.store)}
+
+    @app.get("/api/runs/{name}/flood3d.json")
+    def flood3d(name: str, scenario: str = "moderate_current") -> JSONResponse:
+        """A flooding run's flood records for Valdrada's overlay (city_investigator.valdrada_flood): the model's
+        areas with the depth of their class, and the nearest sensor's deepest reading."""
+        result = json.loads((run_folder(name) / "result.json").read_text())
+        layers = map_layers(result, None, state.store)
+        location = result["photo"]["location"]
+        gauge_point = next(iter(layers["gauge"]["features"]), None)
+        body = {
+            "center": {"lat": location["lat"], "lon": location["lon"]},
+            "scenario": scenario,
+            "note": "city flood model areas at their depth class, and a FloodNet sensor's deepest reading",
+            "areas": [
+                {"geometry": feature["geometry"], "depth_m": FLOOD_DEPTH_M.get(feature["properties"]["category"], 0.3),
+                 "label": feature["properties"]["label"]}
+                for feature in layers["flood"]["features"] if feature["properties"]["scenario"] == scenario
+            ],
+            "gauge": {
+                "lon": gauge_point["properties"]["lon"], "lat": gauge_point["properties"]["lat"],
+                "depth_m": gauge_point["properties"]["height"], "label": gauge_point["properties"]["label"],
+            } if gauge_point else None,
+        }
+        # Valdrada runs on its own port on this computer and fetches this from there.
+        return JSONResponse(body, headers={"Access-Control-Allow-Origin": "*"})
 
     @app.get("/api/runs/{name}/files/{file}")
     def run_file(name: str, file: str) -> FileResponse:

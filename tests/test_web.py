@@ -173,3 +173,34 @@ def test_district_overview_shows_the_last_batch(client, tmp_path, monkeypatch):
     [point] = data["sites"]["features"]
     assert point["properties"]["worst"] == "agreement" and point["properties"]["run"] == run.name
     assert point["properties"]["label"] == "Street trees" and point["geometry"]["coordinates"] == [SHED[1], SHED[0]]
+
+
+def test_valdrada_gets_a_flood_runs_water_and_sensor_reading(client, tmp_path):
+    run = tmp_path / "runs" / "20261030-130000-123"
+    run.mkdir(parents=True)
+    run.joinpath("result.json").write_text(json.dumps({
+        "topic": "flooding", "radius_m": 150, "flags": [], "records": [],
+        "photo": {"location": {"lat": CORNER[0], "lon": CORNER[1], "uncertainty_m": 10}},
+        "recurrence": {"floodnet": {"deepest_in": 35.94}},
+    }))
+    response = client.get(f"/api/runs/{run.name}/flood3d.json")
+    assert response.headers["access-control-allow-origin"] == "*"  # Valdrada fetches it from its own port
+    data = response.json()
+    assert {area["depth_m"] for area in data["areas"]} == {0.2, 0.45}  # the model's two classes near the corner
+    assert data["gauge"]["depth_m"] == 0.91 and data["center"] == {"lat": CORNER[0], "lon": CORNER[1]}
+    assert client.get(f"/api/runs/{run.name}/flood3d.json?scenario=moderate_2050").json()["areas"] == []  # not in this store
+
+
+def test_the_flood_overlay_installs_into_valdrada_once(tmp_path):
+    from city_investigator import valdrada_flood
+
+    source = tmp_path / "valdrada" / "client" / "src"
+    (source / "city").mkdir(parents=True)
+    (source / "main.js").write_bytes(b"async function boot() {\r\n  await streamer.init('tiles');\r\n  bootMark('tile manifest');\r\n  next();\r\n}\r\n")
+    assert len(valdrada_flood.install(tmp_path / "valdrada")) == 2
+    text = (source / "main.js").read_bytes().decode()
+    assert "bootMark('tile manifest');\r\n  // City Investigator" in text and "\r\n    .catch(" in text  # kept CRLF
+    assert (source / "city" / "cityInvestigatorFlood.js").read_text().startswith("// City Investigator's flood records")
+    assert valdrada_flood.install(tmp_path / "valdrada") == []  # a second run changes nothing
+    with pytest.raises(SystemExit):
+        valdrada_flood.install(tmp_path)  # not a Valdrada folder

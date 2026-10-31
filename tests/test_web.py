@@ -192,18 +192,18 @@ def test_valdrada_gets_a_runs_scene_with_the_flood_water_and_sensor_reading(clie
     assert client.get(f"/api/runs/{run.name}/scene3d.json?scenario=moderate_2050").json()["flood"]["areas"] == []
 
 
-def test_the_flood_overlay_installs_into_valdrada_once(tmp_path):
-    from city_investigator import valdrada_flood
+def test_the_addon_installs_into_valdrada_once_and_replaces_an_earlier_one(tmp_path):
+    from city_investigator import valdrada_addon
 
     source = tmp_path / "valdrada" / "client" / "src"
     (source / "city").mkdir(parents=True)
     (source / "main.js").write_bytes(b"async function boot() {\r\n  await streamer.init('tiles');\r\n  bootMark('tile manifest');\r\n  next();\r\n}\r\n")
-    assert len(valdrada_flood.install(tmp_path / "valdrada")) == 2
+    assert len(valdrada_addon.install(tmp_path / "valdrada")) == 2
     text = (source / "main.js").read_bytes().decode()
     assert "bootMark('tile manifest');\r\n  // City Investigator" in text and "\r\n    .catch(" in text  # kept CRLF
-    assert "m.connect(engine.scene, streamer, () => controller" in text and text.endswith("  next();\r\n}\r\n")
-    assert (source / "city" / "cityInvestigatorFlood.js").read_text().startswith("// City Investigator's flood records")
-    assert valdrada_flood.install(tmp_path / "valdrada") == []  # a second run changes nothing
+    assert "m.connect({ scene: engine.scene, streamer, instancer, camera: () => controller }" in text and text.endswith("  next();\r\n}\r\n")
+    assert (source / "city" / "cityInvestigator.js").read_text().startswith("// City Investigator's records over Valdrada")
+    assert valdrada_addon.install(tmp_path / "valdrada") == []  # a second run changes nothing
 
     earlier = (  # the first version's hook, which loaded the module only for ?flood=
         "  // City Investigator: a run's flood records over the ground (?flood=<url>; added by city_investigator.valdrada_flood)\n"
@@ -212,8 +212,12 @@ def test_the_flood_overlay_installs_into_valdrada_once(tmp_path):
         "    .catch((e) => console.warn('flood overlay unavailable', e));\n"
     )
     (source / "main.js").write_text("  bootMark('tile manifest');\n" + earlier + "  next();\n")
-    assert valdrada_flood.install(tmp_path / "valdrada") == ["updated the City Investigator hook in client/src/main.js"]
+    (source / "city" / "cityInvestigatorFlood.js").write_text("// the first version's module")
+    assert valdrada_addon.install(tmp_path / "valdrada") == [
+        "removed the earlier cityInvestigatorFlood.js", "updated the City Investigator hook in client/src/main.js",
+    ]
+    assert not (source / "city" / "cityInvestigatorFlood.js").exists()
     text = (source / "main.js").read_text()
-    assert "addFloodOverlay" not in text and text.count(valdrada_flood.TAG) == 1 and text.endswith(".catch((e) => console.warn('City Investigator add-on unavailable', e));\n  next();\n")
+    assert "addFloodOverlay" not in text and text.count(valdrada_addon.TAG) == 1 and text.endswith(".catch((e) => console.warn('City Investigator add-on unavailable', e));\n  next();\n")
     with pytest.raises(SystemExit):
-        valdrada_flood.install(tmp_path)  # not a Valdrada folder
+        valdrada_addon.install(tmp_path)  # not a Valdrada folder

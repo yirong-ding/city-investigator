@@ -1,15 +1,17 @@
-"""Install City Investigator's flood overlay into a local copy of Valdrada.
+"""Install City Investigator's add-on into a local copy of Valdrada.
 
-Valdrada (github.com/mkturkcan/valdrada) has rain but no flood water. This copies one module,
-cityInvestigatorFlood.js, into its client/src/city/ and adds a hook to client/src/main.js that
-loads it at boot. The page's Valdrada 3D view passes ?flood=<url> for flooding investigations: the
-city flood model's areas at their depth class and the nearest sensor's deepest reading, drawn over
-Valdrada's ground. Once Valdrada has loaded in the page, the module also takes the page's messages,
-so another place moves the camera and swaps the records instead of loading the city again.
-Running it again changes nothing; it replaces an earlier version's hook.
+Valdrada (github.com/mkturkcan/valdrada) is a 3D city of New York. This copies one module,
+cityInvestigator.js, into its client/src/city/ and adds a hook to client/src/main.js that loads it
+at boot. The page's Valdrada 3D view passes ?scene=<url>, a run's scene (city_investigator.scene3d):
+the flood records as water, buildings with a shed permit valid on the photo's date with Valdrada's
+own shed model, scaffolding the photo shows, and unsafe façades, each labeled with its source.
+Valdrada's randomly placed sheds are taken away, so every shed in view is a record or the photo.
+Once Valdrada has loaded in the page, the module also takes the page's messages, so another place
+moves the camera and swaps the scene instead of loading the city again. Running it again changes
+nothing; it replaces an earlier version's hook and module.
 
 Usage:
-  python -m city_investigator.valdrada_flood G:\\Projects\\valdrada
+  python -m city_investigator.valdrada_addon G:\\Projects\\valdrada
 """
 
 from __future__ import annotations
@@ -18,14 +20,15 @@ import argparse
 import shutil
 from pathlib import Path
 
-MODULE = Path(__file__).parent / "valdrada" / "cityInvestigatorFlood.js"
+MODULE = Path(__file__).parent / "valdrada" / "cityInvestigator.js"
+EARLIER_MODULES = ("cityInvestigatorFlood.js",)
 ANCHOR = "  bootMark('tile manifest');"
-TAG = "added by city_investigator.valdrada_flood"  # on the first line of every version of the hook
+TAG = "added by city_investigator.valdrada_"  # on the first line of every version of the hook
 HOOK = (
-    f"  // City Investigator ({TAG}): a run's flood records over the ground (?flood=<url>), and the page that\n"
-    "  // frames Valdrada moving it to another place without loading the city again\n"
-    "  import('./city/cityInvestigatorFlood.js')\n"
-    "    .then((m) => m.connect(engine.scene, streamer, () => controller, Q.get('flood')))\n"
+    f"  // City Investigator ({TAG}addon): a run's records and what its photo shows (?scene=<url>), and the page\n"
+    "  // that frames Valdrada moving it to another place without loading the city again\n"
+    "  import('./city/cityInvestigator.js')\n"
+    "    .then((m) => m.connect({ scene: engine.scene, streamer, instancer, camera: () => controller }, Q.get('scene')))\n"
     "    .catch((e) => console.warn('City Investigator add-on unavailable', e));\n"
 )
 
@@ -46,6 +49,11 @@ def install(valdrada: Path) -> list[str]:
     if not main.is_file():
         raise SystemExit(f"{main} not found: give the folder Valdrada was cloned into.")
     done = []
+    for name in EARLIER_MODULES:
+        earlier = valdrada / "client" / "src" / "city" / name
+        if earlier.is_file():
+            earlier.unlink()
+            done.append(f"removed the earlier {name}")
     target = valdrada / "client" / "src" / "city" / MODULE.name
     if not target.is_file() or target.read_bytes() != MODULE.read_bytes():
         shutil.copyfile(MODULE, target)

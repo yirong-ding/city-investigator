@@ -331,9 +331,9 @@ function valdradaPlace(map) {
     yaw: typeof map.heading_deg === 'number' ? +((-map.heading_deg * Math.PI) / 180).toFixed(3) : 0,  // 0 looks north, turning left
     pitch: 0,
     rain: flooding ? 1 : 0,
-    // The flood model's water and the sensor's deepest reading, drawn by City Investigator's add-on to Valdrada
-    // (python -m city_investigator.valdrada_flood); without the add-on Valdrada ignores it.
-    flood: flooding ? `${location.origin}/api/runs/${encodeURIComponent(state.run.name)}/flood3d.json?scenario=${state.scenario}` : null,
+    // The run's records and what its photo shows (flood water, permitted sheds, unsafe façades), drawn by City
+    // Investigator's add-on to Valdrada (python -m city_investigator.valdrada_addon); without it Valdrada ignores this.
+    scene: `${location.origin}/api/runs/${encodeURIComponent(state.run.name)}/scene3d.json?scenario=${state.scenario}`,
   };
 }
 
@@ -349,7 +349,7 @@ function valdradaLink(place, base) {
     pitch: String(place.pitch), hud: '0', tier: 'low', lodbd: '0', nosim: '1', lmwait: '5',
   });
   if (place.rain) query.set('rain', String(place.rain));
-  if (place.flood) query.set('flood', place.flood);
+  query.set('scene', place.scene);
   return `${base}/?${query}`;
 }
 

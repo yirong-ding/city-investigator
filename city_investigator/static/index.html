@@ -110,11 +110,15 @@
       <div id="legend" class="legend" hidden></div>
       <section id="valdrada" class="valdrada" aria-label="This spot in Valdrada, a 3D city of New York">
         <iframe id="valdrada-frame" title="This spot in Valdrada, a 3D city of New York" allow="fullscreen; pointer-lock; clipboard-write"></iframe>
+        <div class="after-switch toggle" id="after-switch" aria-label="Before or after the proposals" hidden>
+          <button type="button" data-after="0" class="on">Before</button>
+          <button type="button" data-after="1" title="Each proposal under What could be done, drawn as an illustration of the action done: not a design and not a prediction">After: proposals</button>
+        </div>
         <p class="valdrada-note">
           <strong>Valdrada</strong>, a 3D city of New York by Mehmet Kerem Turkcan, built from public records (open source, MIT).
           Some street details, such as sidewalk sheds, are generated, so this view shows the place, not the evidence.
           It runs on this computer (setup in its <a href="https://github.com/mkturkcan/valdrada/blob/main/BUILDING.md" target="_blank" rel="noopener">BUILDING.md</a>, then <code>npm run dev</code> in its client folder); a blank view means it is not running.
-          The run's records appear in it once City Investigator's add-on is installed (<code>python -m city_investigator.valdrada_addon</code> and Valdrada's folder): flood water, sheds with a permit valid on the photo's date, scaffolding the photo shows, unsafe façades. Valdrada's own sheds, placed at random, are taken away.
+          The run's records appear in it once City Investigator's add-on is installed (<code>python -m city_investigator.valdrada_addon</code> and Valdrada's folder): flood water, sheds with a permit valid on the photo's date, scaffolding the photo shows, unsafe façades. Valdrada's own sheds, placed at random, are taken away. <strong>After</strong> draws the proposals under What could be done as illustrations (rain gardens, the shed an unsafe façade must have, a young tree, or a label): not a design and not a prediction.
           Click inside, then move with W A S D and look with the mouse.
           <a id="valdrada-tab" target="_blank" rel="noopener">Open in a new tab</a> if the mouse does not engage.
         </p>

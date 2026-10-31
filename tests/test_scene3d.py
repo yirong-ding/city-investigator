@@ -115,3 +115,25 @@ def test_the_list_shows_what_each_investigation_draws(tmp_path, monkeypatch, cap
         "Unsafe façades at 9 B ST: 0 permitted shed(s), 0 seen in the photo, 1 unsafe façade(s)\n"
         "    http://127.0.0.1:8000/#run=20261031-100000-1\n"
     )
+
+
+def test_proposals_are_placed_at_what_they_cite_with_how_to_draw_them():
+    buildings = Buildings.from_rows([WIDE, SMALL])
+    filing = {"id": "fisp:9", "category": "facade_filing", "bbl": "3009670020", "lat": at(0, 40)[0], "lon": at(0, 40)[1]}
+    flag = {"type": "facade_unsafe_unprotected", "severity": "conflict", "message": "", "evidence_ids": ["fisp:9"]}
+    tree = {"id": "tree_points:5", "category": "tree_inventory", "lat": at(5, 5)[0], "lon": at(5, 5)[1]}
+    complaint = {"id": "311:7", "category": "dead_tree", "lat": at(9, 9)[0], "lon": at(9, 9)[1]}
+    explanation = {"evidence": {}, "claims": [
+        {"kind": "proposal", "text": "A 311 report could ask DOB to inspect.", "evidence_ids": ["action:311_debris_falling_or", "flag:facade_unsafe_unprotected"]},
+        {"kind": "proposal", "text": "Parks could inspect the tree.", "evidence_ids": ["action:311_dead_dying_tree", "311:7", "tree_points:5"]},
+        {"kind": "proposal", "text": "Rain gardens could soak up runoff.", "evidence_ids": ["action:green_infrastructure", "311:7"]},
+        {"kind": "proposal", "text": "The board could raise it.", "evidence_ids": ["action:community_board", "311:7"]},
+        {"kind": "record", "text": "A complaint.", "evidence_ids": ["311:7"]},
+    ]}
+    data = scene(run(flags=[flag], records=[filing, tree, complaint]), buildings, None, explanation)
+    shed, young, gardens, board = data["after"]
+    assert shed["draw"] == "shed" and shed["height_m"] and len(shed["rings"][0]) == 5  # the unsafe building's outline
+    assert young["draw"] == "young_tree" and young["at"] == [tree["lon"], tree["lat"]]  # the inventory tree, not the lot
+    assert gardens["draw"] == "rain_gardens" and gardens["at"] == [LON, LAT]  # around the low spot the photo shows
+    assert board["draw"] is None and board["at"] == [complaint["lon"], complaint["lat"]] and board["text"] == "The board could raise it."
+    assert scene(run(), buildings, None, None)["after"] == []

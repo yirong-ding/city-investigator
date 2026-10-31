@@ -10,7 +10,10 @@
 // - sheds: buildings with a shed or scaffold permit valid on the photo's date, with Valdrada's own shed model along
 //   each wall that faces a sidewalk, as deep as the sidewalk;
 // - seen: scaffolding found in the photo, the same shed along the building front it was traced to from the camera;
-// - facades: buildings whose latest façade filing is UNSAFE, their street walls washed red.
+// - facades: buildings whose latest façade filing is UNSAFE, their street walls washed red;
+// - after: the explanation's proposals, shown when the page switches to After: each action done as an illustration
+//   (curbside rain gardens on the sidewalks around the low spot, the shed an unsafe façade must have, a young tree),
+//   or a label where the action has no picture. Not a design and not a prediction: the flood water stays as recorded.
 // Valdrada places sidewalk sheds at random (about 1 in 80 building fronts); they are taken away here, so every shed in
 // view is a record or the photo. It shows records, not a simulation.
 //
@@ -31,7 +34,9 @@ const WALK = new Set(['sidewalk', 'path', 'brick', 'plaza', 'gravel']);   // Val
 const CURB_M = 8;      // a sidewalk is measured out to this width at most
 const SHED_DEPTH = 4.4;   // Valdrada's default shed depth, where the sidewalk cannot be measured
 const WALL_MIN = 2;    // meters: shorter walls get no shed
-const COLORS = { record: '#f2a900', photo: '#3d8bfd', unsafe: '#d92b2b' };
+const COLORS = { record: '#f2a900', photo: '#3d8bfd', unsafe: '#d92b2b', proposal: '#2b7a3d' };
+const GARDEN = [6, 1.5];   // meters along and across the curb: a curbside rain garden's size
+const GARDENS = 3;     // rain gardens shown around a low spot
 const LABEL_Y = 5.6;   // meters over the sidewalk: a label clears a shed's parapet
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -335,11 +340,26 @@ function surfaceY(streamer, x, z) {
   return info && Number.isFinite(info.y) ? info.y : (streamer.terrainAt(x, z) ?? 0) + 0.28;
 }
 
-// A two-line label over a piece: what it is, in its color, and where it comes from.
+// Text in lines of at most `width` characters, at most `most` lines, the last cut short with an ellipsis.
+function wrap(text, width = 44, most = 3) {
+  const lines = [];
+  for (const word of String(text || '').split(/\s+/).filter(Boolean)) {
+    const last = lines.length - 1;
+    if (last >= 0 && (lines[last] + ' ' + word).length <= width) lines[last] += ' ' + word;
+    else lines.push(word);
+  }
+  if (lines.length <= most) return lines;
+  const kept = lines.slice(0, most);
+  kept[most - 1] = kept[most - 1].slice(0, width - 1) + '…';
+  return kept;
+}
+
+// A label over a piece: what it is, in its color, then where it comes from (wrapped).
 function label(lines, color, x, y, z) {
+  const rest = wrap(lines.slice(1).join(' '));
   const canvas = document.createElement('canvas');
   canvas.width = 1024;
-  canvas.height = 192;
+  canvas.height = 108 + 64 * rest.length;
   const g = canvas.getContext('2d');
   g.fillStyle = 'rgba(16, 20, 24, 0.82)';
   g.fillRect(0, 0, canvas.width, canvas.height);
@@ -349,12 +369,12 @@ function label(lines, color, x, y, z) {
   g.fillText(lines[0], 44, 78);
   g.fillStyle = '#ffffff';
   g.font = '44px Arial, Helvetica, sans-serif';
-  g.fillText(lines[1] || '', 44, 150);
+  rest.forEach((line, i) => g.fillText(line, 44, 150 + 64 * i));
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   const sprite = own(new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, toneMapped: false })));
-  sprite.scale.set(6.4, 1.2, 1);
-  sprite.position.set(x, y, z);
+  sprite.scale.set(6.4, (6.4 * canvas.height) / canvas.width, 1);
+  sprite.position.set(x, y + sprite.scale.y / 2 - 0.6, z);
   return sprite;
 }
 
@@ -392,6 +412,128 @@ function facadeWash(streamer, walls, height, color) {
   return group;
 }
 
+// A curbside rain garden: a low stone rim round a planted bed, its long side along the curb (local x), the curb at +z.
+function rainGarden() {
+  const group = new THREE.Group();
+  const [length, width] = GARDEN;
+  const stone = new THREE.MeshStandardMaterial({ color: 0xb9b4a8, roughness: 0.9 });
+  for (const [w, d, x, z] of [[length, 0.15, 0, (width - 0.15) / 2], [length, 0.15, 0, -(width - 0.15) / 2],
+    [0.15, width, (length - 0.15) / 2, 0], [0.15, width, -(length - 0.15) / 2, 0]]) {
+    const rim = own(new THREE.Mesh(new THREE.BoxGeometry(w, 0.16, d), stone));
+    rim.position.set(x, 0.08, z);
+    group.add(rim);
+  }
+  const bed = own(new THREE.Mesh(new THREE.PlaneGeometry(length - 0.3, width - 0.3), new THREE.MeshStandardMaterial({ color: 0x3b2f22, roughness: 1 })));
+  bed.rotation.x = -Math.PI / 2;
+  bed.position.y = 0.03;
+  group.add(bed);
+  const greens = [0x4f7a32, 0x5d8a3a, 0x3f6b2a, 0x6b8f3e].map((color) => new THREE.MeshStandardMaterial({ color, roughness: 0.85 }));
+  for (let i = 0; i < 16; i++) {   // grasses and shrubs, spread along the bed
+    const r = 0.18 + 0.12 * Math.abs(Math.sin(i * 7.31));
+    const plant = own(new THREE.Mesh(new THREE.IcosahedronGeometry(r, 0), greens[i % greens.length]));
+    plant.scale.y = 1.4;
+    plant.position.set(((i + 0.5) / 16 - 0.5) * (length - 0.6), r * 1.1, Math.sin(i * 3.7) * (width / 2 - 0.4));
+    group.add(plant);
+  }
+  return group;
+}
+
+// A young street tree in its pit.
+function youngTree() {
+  const group = new THREE.Group();
+  const pit = own(new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.2), new THREE.MeshStandardMaterial({ color: 0x3b2f22, roughness: 1 })));
+  pit.rotation.x = -Math.PI / 2;
+  pit.position.y = 0.03;
+  const trunk = own(new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.06, 2.6, 8), new THREE.MeshStandardMaterial({ color: 0x5a4632, roughness: 0.9 })));
+  trunk.position.y = 1.3;
+  const crown = own(new THREE.Mesh(new THREE.IcosahedronGeometry(0.85, 1), new THREE.MeshStandardMaterial({ color: 0x5d8a3a, roughness: 0.8 })));
+  crown.scale.y = 1.25;
+  crown.position.y = 2.9;
+  group.add(pit, trunk, crown);
+  return group;
+}
+
+// The nearest roadway from a sidewalk point within 3 m: its direction and distance.
+function curbFrom(streamer, x, z) {
+  let best = null;
+  for (let k = 0; k < 16; k++) {
+    const d = [Math.sin((k * Math.PI) / 8), Math.cos((k * Math.PI) / 8)];
+    for (let s = 0.25; s <= 3 && (!best || s < best.s); s += 0.25) {
+      if (streamer.surfaceInfoAt(x + d[0] * s, z + d[1] * s)?.road) { best = { d, s }; break; }
+    }
+  }
+  return best;
+}
+
+// Where rain gardens could go around a low spot: sidewalk along a curb, on ground higher than the spot (water runs
+// down to it) where there is any, nearer first, at least 15 m apart; each set back 0.3 m from the curb.
+function gardenSpots(streamer, cx, cz) {
+  const base = streamer.terrainAt(cx, cz) ?? 0;
+  const candidates = [];
+  for (const r of [10, 16, 22, 28, 34, 40]) {
+    for (let a = 0; a < 360; a += 10) {
+      const x = cx + r * Math.sin((a * Math.PI) / 180), z = cz + r * Math.cos((a * Math.PI) / 180);
+      const curb = WALK.has(streamer.surfaceInfoAt(x, z)?.kind) ? curbFrom(streamer, x, z) : null;
+      if (!curb) continue;
+      const shift = curb.s - 0.3 - GARDEN[1] / 2;
+      const [gx, gz] = [x + curb.d[0] * shift, z + curb.d[1] * shift];
+      const along = [curb.d[1], -curb.d[0]];
+      const corners = [[1, 1], [1, -1], [-1, 1], [-1, -1]].map(([u, v]) => [
+        gx + along[0] * u * GARDEN[0] / 2 + curb.d[0] * v * GARDEN[1] / 2, gz + along[1] * u * GARDEN[0] / 2 + curb.d[1] * v * GARDEN[1] / 2]);
+      if (!corners.every(([qx, qz]) => WALK.has(streamer.surfaceInfoAt(qx, qz)?.kind))) continue;
+      candidates.push({ x: gx, z: gz, r, higher: (streamer.terrainAt(gx, gz) ?? base) > base + 0.05, d: curb.d });
+    }
+  }
+  candidates.sort((p, q) => q.higher - p.higher || p.r - q.r);
+  const spots = [];
+  for (const c of candidates) if (spots.length < GARDENS && spots.every((s) => Math.hypot(s.x - c.x, s.z - c.z) > 15)) spots.push(c);
+  return spots;
+}
+
+// The proposals, drawn as illustrations of each action done, each with a label of the proposal.
+async function afterGroup(streamer, items, props) {
+  const group = new THREE.Group();
+  group.name = 'city-investigator-after';
+  const stacked = new Map();   // labels at one place stack upward
+  const note = (item, x, y, z) => {
+    const key = `${Math.round(x)},${Math.round(z)}`;
+    const n = stacked.get(key) ?? 0;
+    stacked.set(key, n + 1);
+    group.add(label(['Proposal (illustration)', item.text], COLORS.proposal, x, y + 2.4 * n, z));
+  };
+  for (const item of items) {
+    const [x, z] = project(...item.at);
+    await until(() => loaded(streamer, [x, z]), 30);
+    if (item.draw === 'rain_gardens') {
+      const spots = gardenSpots(streamer, x, z);
+      for (const spot of spots) {
+        const garden = rainGarden();
+        garden.position.set(spot.x, surfaceY(streamer, spot.x, spot.z), spot.z);
+        garden.rotation.y = Math.atan2(spot.d[0], spot.d[1]);
+        group.add(garden);
+      }
+      const first = spots[0] ?? { x, z };
+      note(item, first.x, surfaceY(streamer, first.x, first.z) + 2.2, first.z);
+      if (!spots.length) console.warn('[city-investigator] no sidewalk along a curb near the low spot for rain gardens');
+    } else if (item.draw === 'shed' && item.rings && props) {
+      const walls = streetWalls(streamer, item.rings.map((ring) => ring.map(([lon, lat]) => project(lon, lat))));
+      for (const w of walls) group.add(shedAlong(props, streamer, w, COLORS.proposal).group);
+      const front = walls.sort((p, q) => q.length - p.length)[0];
+      const [lx, lz] = front ? [front.mid[0] + front.n[0] * 2, front.mid[1] + front.n[1] * 2] : [x, z];
+      note(item, lx, surfaceY(streamer, lx, lz) + LABEL_Y + 3.2, lz);
+    } else if (item.draw === 'young_tree') {
+      const tree = youngTree();
+      tree.position.set(x, surfaceY(streamer, x, z), z);
+      group.add(tree);
+      note(item, x, surfaceY(streamer, x, z) + 4.6, z);
+    } else {
+      note(item, x, surfaceY(streamer, x, z) + LABEL_Y, z);
+    }
+  }
+  console.log(`[city-investigator] after: ${items.length} proposal(s): ${items.map((item) => item.draw || 'label').join(', ')}`);
+  return group;
+}
+
 // The run's scene around one place, as a group not yet in the city.
 async function sceneGroup(streamer, url) {
   const data = await (await fetch(url)).json();
@@ -403,7 +545,7 @@ async function sceneGroup(streamer, url) {
   group.name = 'city-investigator';
   if (data.flood) group.add(await floodParts(data.flood, groundAt, cx, cz));
   const ringsOfItem = (item) => item.rings.map((ring) => ring.map(([lon, lat]) => project(lon, lat)));
-  const props = (data.sheds?.length || data.seen?.length) ? await streetPieces() : null;
+  const props = (data.sheds?.length || data.seen?.length || data.after?.some((item) => item.draw === 'shed')) ? await streetPieces() : null;
   const permitted = [];   // the walls with a permitted shed drawn
   for (const item of data.sheds || []) {
     const rings = ringsOfItem(item);
@@ -445,6 +587,7 @@ async function sceneGroup(streamer, url) {
     }
   }
   console.log(`[city-investigator] scene: ${data.sheds?.length || 0} permitted sheds, ${data.seen?.length || 0} seen in the photo, ${data.facades?.length || 0} unsafe façades${data.flood ? ', flood' : ''}`);
+  group.add(await afterGroup(streamer, data.after || [], props));
   return group;
 }
 
@@ -459,9 +602,11 @@ function clearRandomSheds(instancer) {
 }
 
 // Called once at boot (the hook in main.js): draws ?scene=<url>, and when Valdrada is framed, takes the framing page's
-// {type: 'city-investigator:view', x, z, y, yaw, pitch, rain, scene} to move there, with y over the ground there.
+// {type: 'city-investigator:view', x, z, y, yaw, pitch, rain, scene} to move there, with y over the ground there, and
+// {type: 'city-investigator:after', on} to show the proposals or not (not by default; also when Valdrada is not framed).
 export function connect({ scene, streamer, instancer, camera: controllerOf }, sceneUrl) {
-  let shown = null, latest = 0, pending = null;
+  let shown = null, latest = 0, pending = null, after = new URLSearchParams(location.search).get('after') === '1';
+  const showAfter = () => { const part = shown?.getObjectByName?.('city-investigator-after'); if (part) part.visible = after; };
   const warn = (e) => console.warn('[city-investigator] scene unavailable', e);
   const showScene = async (url) => {
     const mine = ++latest;
@@ -471,6 +616,7 @@ export function connect({ scene, streamer, instancer, camera: controllerOf }, sc
     if (mine !== latest) { dispose(group); return; }   // another place was asked for meanwhile
     scene.add(group);
     shown = group;
+    showAfter();
   };
   clearRandomSheds(instancer);
   streamer.onTile?.(() => clearRandomSheds(instancer), () => {});
@@ -490,6 +636,7 @@ export function connect({ scene, streamer, instancer, camera: controllerOf }, sc
   setInterval(move, 250);
   addEventListener('message', (event) => {
     const view = event.data;
+    if (event.source === window.parent && view?.type === 'city-investigator:after') { after = !!view.on; showAfter(); return; }
     if (event.source !== window.parent || view?.type !== 'city-investigator:view') return;
     pending = view;
     move();

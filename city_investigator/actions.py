@@ -18,15 +18,19 @@ from city_investigator.topics import slug
 class Action:
     key: str
     summary: str
+    # How the 3D After view illustrates the action done (city_investigator.scene3d): curbside "rain_gardens", the
+    # "shed" an unsafe façade must have, a "young_tree" replanted; None for a label only.
+    after: str | None = None
 
 
-def report(complaint_type: str, descriptor: str | None, agency: str, use: str) -> Action:
+def report(complaint_type: str, descriptor: str | None, agency: str, use: str, after: str | None = None) -> Action:
     """A 311 report, named the way the city's records name it."""
     assert (complaint_type, descriptor) in COMPLAINTS, (complaint_type, descriptor)
     wording = f"'{complaint_type}'" + (f", '{descriptor}'" if descriptor else "")
     return Action(
         "311_" + "_".join(slug(descriptor or complaint_type).split("_")[:3]),
         f"A 311 report under {wording} (the wording in the city's own records), which goes to {agency}: {use}.",
+        after,
     )
 
 
@@ -40,6 +44,7 @@ GREEN_INFRASTRUCTURE = Action(
     "green_infrastructure",
     "The NYC Department of Environmental Protection's Green Infrastructure Program builds curbside rain gardens "
     "and similar features that soak up stormwater before it reaches the sewers.",
+    after="rain_gardens",
 )
 GENERAL = "General Construction/Plumbing"
 
@@ -58,7 +63,8 @@ ACTIONS: dict[str, tuple[Action, ...]] = {
         COMMUNITY_BOARD,
     ),
     "trees": (
-        report("Dead/Dying Tree", None, "NYC Parks", "a street tree that looks dead or dying, so it is inspected"),
+        report("Dead/Dying Tree", None, "NYC Parks", "a street tree that looks dead or dying, so it is inspected",
+               after="young_tree"),
         report("Damaged Tree", None, "NYC Parks", "a cracked or hanging branch or a damaged tree"),
         report("Root/Sewer/Sidewalk Condition", None, "NYC Parks",
                "a sidewalk lifted by a street tree's roots, which Parks' Trees and Sidewalks Program repairs"),
@@ -66,7 +72,7 @@ ACTIONS: dict[str, tuple[Action, ...]] = {
     ),
     "facades": (
         report(GENERAL, "Debris - Falling Or In Danger Of Falling", "the Department of Buildings",
-               "material falling or about to fall from a building; for immediate danger, call 911"),
+               "material falling or about to fall from a building; for immediate danger, call 911", after="shed"),
         COMMUNITY_BOARD,
     ),
     "sidewalk_damage": (

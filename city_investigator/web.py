@@ -414,9 +414,12 @@ def create_app(state: State | None = None) -> FastAPI:
     @app.get("/api/runs/{name}/scene3d.json")
     def scene3d(name: str, scenario: str = "moderate_current") -> JSONResponse:
         """What City Investigator's add-on draws in Valdrada for a run (city_investigator.scene3d)."""
-        result = json.loads((run_folder(name) / "result.json").read_text())
+        folder = run_folder(name)
+        result = json.loads((folder / "result.json").read_text())
+        path = folder / "explanation.json"
+        explanation = json.loads(path.read_text()) if path.is_file() else None
         store = state.store
-        body = scene(result, store.buildings if store else None, flood_layer(result, store, scenario))
+        body = scene(result, store.buildings if store else None, flood_layer(result, store, scenario), explanation)
         # Valdrada runs on its own port on this computer and fetches this from there.
         return JSONResponse(body, headers={"Access-Control-Allow-Origin": "*"})
 

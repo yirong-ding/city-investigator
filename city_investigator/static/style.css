@@ -178,6 +178,8 @@ a { color: var(--accent); }
 .stage[data-view="valdrada"] .valdrada { display: block; }
 .stage[data-view="valdrada"] .map, .stage[data-view="valdrada"] .legend { visibility: hidden; }
 .valdrada iframe { width: 100%; height: 100%; border: 0; display: block; }
+.after-switch { position: absolute; top: 52px; left: 50%; transform: translateX(-50%); z-index: 4; margin: 0; }
+.after-switch button.on[data-after="1"] { background: var(--proposal); border-color: var(--proposal); color: #fff; }
 .valdrada-note {
   position: absolute; left: 8px; right: 8px; bottom: 8px; margin: 0; padding: 6px 10px; border-radius: 8px;
   background: rgba(255, 255, 255, 0.92); font-size: 0.78rem; line-height: 1.35;

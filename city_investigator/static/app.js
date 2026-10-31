@@ -39,7 +39,7 @@ const state = {
   view3d: false, mode: 'run',
   map: null, marker: null, photo: null, pin: null, run: null, confirming: false,
   scenario: 'moderate_current', source: null, nextEvent: 0, started: 0, timer: null, highlighted: [],
-  valdradaReady: false, valdradaPlace: null,
+  valdradaReady: false, valdradaPlace: null, after: false,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -337,7 +337,7 @@ function valdradaPlace(map) {
   };
 }
 
-function valdradaLink(place, base) {
+function valdradaLink(place, base, { after = state.after } = {}) {
   // Light settings, for a look at one place. Valdrada loads full detail only around the camera: its low tier (600 m;
   // not less, as its loading screen waits for more than 4 detail tiles, and 300 m can hold only 4), the rest of the
   // city in its coarse far tier, without the backdrop beyond the city's edge (lodbd=0); no traffic or pedestrians
@@ -349,6 +349,7 @@ function valdradaLink(place, base) {
     pitch: String(place.pitch), hud: '0', tier: 'low', lodbd: '0', nosim: '1', lmwait: '5',
   });
   if (place.rain) query.set('rain', String(place.rain));
+  if (after) query.set('after', '1');
   query.set('scene', place.scene);
   return `${base}/?${query}`;
 }
@@ -356,8 +357,18 @@ function valdradaLink(place, base) {
 // Loading Valdrada compiles hundreds of shaders, so the frame loads it once. Its add-on then says it is ready, and
 // another place, or another flood scenario, goes to it as a message: the camera moves and the records are swapped.
 addEventListener('message', (event) => {
-  if (event.origin === VALDRADA && event.data?.type === 'city-investigator:ready') state.valdradaReady = true;
+  if (event.origin !== VALDRADA || event.data?.type !== 'city-investigator:ready') return;
+  state.valdradaReady = true;
+  if (state.after) setAfter(true);
 });
+
+// Before: the records and the photo. After: also the proposals, drawn as illustrations of each action done.
+function setAfter(on) {
+  state.after = on;
+  for (const button of document.querySelectorAll('#after-switch button')) button.classList.toggle('on', (button.dataset.after === '1') === on);
+  if (state.valdradaReady) $('valdrada-frame').contentWindow.postMessage({ type: 'city-investigator:after', on }, VALDRADA);
+  if (state.run) $('valdrada-tab').href = valdradaLink(valdradaPlace(state.run.map), VALDRADA);
+}
 
 // Highlighting: a claim or flag lights up the evidence it cites, on the map and the timeline.
 
@@ -824,7 +835,7 @@ function showStage(view) {
   for (const button of document.querySelectorAll('.stage-switch button')) button.classList.toggle('on', button.dataset.view === view);
   if (view === 'valdrada') {
     const place = valdradaPlace(state.run.map);
-    const link = valdradaLink(place, VALDRADA);
+    const link = valdradaLink(place, VALDRADA, { after: false });  // the frame switches to After by message
     const frame = $('valdrada-frame');
     if (state.valdradaReady) {
       if (JSON.stringify(place) !== state.valdradaPlace) frame.contentWindow.postMessage({ type: 'city-investigator:view', ...place }, VALDRADA);
@@ -832,7 +843,7 @@ function showStage(view) {
       frame.setAttribute('src', link);  // loads only when first shown
     }
     state.valdradaPlace = JSON.stringify(place);
-    $('valdrada-tab').href = link;
+    $('valdrada-tab').href = valdradaLink(place, VALDRADA);
   } else {
     state.map?.resize();
   }
@@ -847,6 +858,8 @@ async function loadRun(name, { waiting = false } = {}) {
   state.mode = 'run';
   $('show-valdrada').disabled = false;
   $('show-valdrada').title = 'This spot in Valdrada, a 3D city of New York';
+  $('after-switch').hidden = !(data.explanation?.claims || []).some((claim) => claim.kind === 'proposal');
+  setAfter(false);
   renderMap(data);
   renderTimeline(data);
   renderAnswer(data, waiting);
@@ -933,6 +946,7 @@ async function init() {
   $('runs').addEventListener('change', () => { if ($('runs').value) loadRun($('runs').value); });
   $('overview').addEventListener('click', () => showOverview().catch((error) => setStatus(error.message, true)));
   for (const button of document.querySelectorAll('.stage-switch button')) button.addEventListener('click', () => showStage(button.dataset.view));
+  for (const button of document.querySelectorAll('#after-switch button')) button.addEventListener('click', () => setAfter(button.dataset.after === '1'));
   let resize;
   window.addEventListener('resize', () => { clearTimeout(resize); resize = setTimeout(() => state.run && renderTimeline(state.run), 150); });
 

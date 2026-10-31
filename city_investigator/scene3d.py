@@ -6,7 +6,10 @@ screen. Every item is a record or a SAM 3.1 detection and is labeled as one:
 - sheds: buildings with a shed or scaffold permit valid on the photo's date (DOB does not record whether a shed is
   standing, so this is what was authorized, drawn with Valdrada's own shed model on the building's street side);
 - facades: buildings whose latest façade filing before the photo is UNSAFE (from the run's flags);
-- seen: scaffolding SAM 3.1 found in the photo, along the building front that its box points at from the camera.
+- seen: scaffolding SAM 3.1 found in the photo, along the building front that its box points at from the camera;
+- after: the explanation's proposals, at the records they cite, with how the After view illustrates each action done
+  (city_investigator.actions: rain gardens, the shed an unsafe façade must have, a young tree); an illustration, not a
+  design or a prediction.
 """
 
 from __future__ import annotations
@@ -16,6 +19,7 @@ import math
 from datetime import datetime, timezone
 from typing import Any
 
+from city_investigator.actions import ACTIONS
 from city_investigator.buildings import Building, Buildings
 
 SHED_LABELS = {"shed_permit": "Shed permit", "scaffold_permit": "Scaffold permit"}
@@ -169,7 +173,39 @@ def seen_structures(result: dict[str, Any], buildings: Buildings) -> list[dict[s
     return seen
 
 
-def scene(result: dict[str, Any], buildings: Buildings | None, flood: dict[str, Any] | None) -> dict[str, Any]:
+def after_view(result: dict[str, Any], explanation: dict[str, Any] | None, buildings: Buildings) -> list[dict[str, Any]]:
+    """The proposals that passed the explanation's checks, each where the findings it cites are."""
+    if not explanation:
+        return []
+    by_id = {item["id"]: item for item in [*result["records"], *(explanation.get("evidence") or {}).values()]}
+    flags = {f"flag:{flag['type']}": flag for flag in result.get("flags", [])}
+    actions = {f"action:{action.key}": action for listed in ACTIONS.values() for action in listed}
+    location = result["photo"]["location"]
+    items = []
+    for claim in explanation.get("claims", []):
+        cited = claim.get("evidence_ids", [])
+        action = next((actions[eid] for eid in cited if eid in actions), None)
+        if claim.get("kind") != "proposal" or action is None:
+            continue
+        records = [by_id[eid] for eid in cited if eid in by_id]
+        records += [by_id[rid] for eid in cited if eid in flags for rid in flags[eid].get("evidence_ids", []) if rid in by_id]
+        located = [item for item in records if item.get("lat") is not None and item.get("lon") is not None]
+        if action.after == "young_tree":  # the tree itself, from the inventory, before an address's lot
+            located.sort(key=lambda item: item.get("category") != "tree_inventory")
+        at = located[0] if located and action.after != "rain_gardens" else location  # rain gardens: around the low spot
+        item = {"action": action.key, "draw": action.after, "text": claim["text"], "at": [at["lon"], at["lat"]]}
+        if action.after == "shed":
+            building = next((found for record in records if (found := buildings.find(
+                record.get("bin"), record.get("bbl"), record.get("lat"), record.get("lon")))), None)
+            item |= outline(building) if building else {"draw": None}
+        items.append(item)
+    return items
+
+
+def scene(
+    result: dict[str, Any], buildings: Buildings | None, flood: dict[str, Any] | None,
+    explanation: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     location = result["photo"]["location"]
     when = moment(result["photo"].get("taken_at")) or datetime.now(timezone.utc)
     buildings = buildings or Buildings([])
@@ -180,6 +216,7 @@ def scene(result: dict[str, Any], buildings: Buildings | None, flood: dict[str, 
         "sheds": record_sheds(result["records"], buildings, when),
         "facades": unsafe_facades(result, buildings),
         "seen": seen_structures(result, buildings),
+        "after": after_view(result, explanation, buildings),
     }
 
 

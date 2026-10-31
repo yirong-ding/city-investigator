@@ -324,15 +324,15 @@ function valdradaLink(map, base) {
   const x = (lon - VALDRADA_ORIGIN.lon) * metersPerDegLon;
   const z = -(lat - VALDRADA_ORIGIN.lat) * 111132;
   const yaw = typeof map.heading_deg === 'number' ? (-map.heading_deg * Math.PI) / 180 : 0;  // yaw 0 looks north, turning left
-  // Light settings, for a look at one place. Valdrada loads full detail only around the camera: its low tier, narrowed
-  // from 600 m to 300 m (the least it allows), with the rest of the city as its coarse far tier and without the
-  // backdrop beyond the city's edge (lodbd=0); no traffic or pedestrians (their models are the heaviest download); a 5 s
-  // wait for the landmarks module.
+  // Light settings, for a look at one place. Valdrada loads full detail only around the camera: its low tier (600 m;
+  // not less, as its loading screen waits for more than 4 detail tiles, and 300 m can hold only 4), the rest of the
+  // city in its coarse far tier, without the backdrop beyond the city's edge (lodbd=0); no traffic or pedestrians
+  // (their models are the heaviest download); a 5 s wait for the landmarks module.
   // fly=1: Valdrada's fly camera, the one that reads y relative to its own ground (rel=1); its default drone takes y
   // as height above sea level, so 1.7 m can sit at or under the street where the ground is a few meters up.
   const query = new URLSearchParams({
     x: x.toFixed(1), z: z.toFixed(1), y: '1.7', rel: '1', fly: '1', yaw: yaw.toFixed(3), pitch: '0', hud: '0',
-    tier: 'low', near: '300', lodbd: '0', nosim: '1', lmwait: '5',
+    tier: 'low', lodbd: '0', nosim: '1', lmwait: '5',
   });
   if (state.run?.result?.topic === 'flooding') {
     query.set('rain', '1');

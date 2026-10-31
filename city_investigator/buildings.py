@@ -24,6 +24,7 @@ SOURCE = "NYC building footprints (ground elevation)"
 PAGE = f"https://data.cityofnewyork.us/d/{FOOTPRINTS_DATASET}"
 FT = 0.3048
 NEAR_M, AROUND_M = 40, 200  # the spot, and the blocks around it
+FIND_M = 20  # a record without a building ID belongs to the nearest building this close
 MIN_NEAR, MIN_AROUND = 2, 10
 DEFAULT_HEIGHT_M = 6.0  # for the map only, when a footprint has no roof height
 KEEP = ("bin", "base_bbl", "mappluto_bbl", "height_roof", "heightroof", "ground_elevation", "groundelev",
@@ -96,6 +97,22 @@ class Buildings:
                 if meters <= radius_m:
                     found.append((building, meters))
         return sorted(found, key=lambda pair: pair[1])
+
+    def find(self, bin: str | None, bbl: str | None, lat: float | None, lon: float | None) -> Building | None:
+        """A record's building: by BIN, else the one on its lot nearest the record, else the nearest within FIND_M."""
+        def nearest(items: list[Building]) -> Building | None:
+            if lat is None or lon is None:
+                return items[0] if items else None
+            return min(items, key=lambda b: distance_m(lat, lon, b.lat, b.lon), default=None)
+
+        by_bin = [b for b in self.items if bin and b.bin == bin]
+        if by_bin:
+            return nearest(by_bin)
+        on_lot = [b for b in self.items if bbl and b.bbl == bbl]
+        if on_lot:
+            return nearest(on_lot)
+        close = self.around(lat, lon, FIND_M) if lat is not None and lon is not None else []
+        return close[0][0] if close else None
 
     def features(self, lat: float, lon: float, half_m: float, highlight: set[str] | None = None) -> dict[str, Any]:
         """The buildings around a point as map polygons, with heights in meters."""

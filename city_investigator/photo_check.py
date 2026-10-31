@@ -25,7 +25,10 @@ from city_investigator.settings import ROOT, load_env
 
 OUTPUT = ROOT / "data" / "private" / "mapillary"
 DEFAULT_CONCEPTS = ["scaffolding", "sidewalk shed", "covered walkway"]
-IMAGE_FIELDS = "id,thumb_2048_url,captured_at,creator,computed_geometry,compass_angle,computed_compass_angle"
+IMAGE_FIELDS = (
+    "id,thumb_2048_url,captured_at,creator,computed_geometry,compass_angle,computed_compass_angle,"
+    "is_pano,camera_type,camera_parameters"
+)
 
 
 def fetch_image(photo_id: str, token: str, session: requests.Session | None = None) -> tuple[Path, dict[str, Any]]:

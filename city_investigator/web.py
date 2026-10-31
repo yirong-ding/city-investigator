@@ -35,6 +35,7 @@ from city_investigator.explain import explain_run
 from city_investigator.geo import distance_m
 from city_investigator.investigate import OUTPUT, USER_UNCERTAINTY_M, investigate_photo, parse_local
 from city_investigator.photo_input import Photo, from_file, from_mapillary
+from city_investigator.scene3d import scene
 from city_investigator.settings import DERIVED_DIR, ROOT, load_env
 from city_investigator.shortlist import street_view
 from city_investigator.sources import SOURCES, STATE_CATEGORIES
@@ -255,6 +256,28 @@ def gauge(result: dict[str, Any], store: Store | None, lat: float, lon: float) -
     }]}
 
 
+def flood_layer(result: dict[str, Any], store: Store | None, scenario: str) -> dict[str, Any] | None:
+    """A flooding run's flood records for Valdrada: the model's areas with the depth of their class, and the nearest
+    sensor's deepest reading."""
+    if result["topic"] != "flooding":
+        return None
+    layers = map_layers(result, None, store)
+    gauge_point = next(iter(layers["gauge"]["features"]), None)
+    return {
+        "scenario": scenario,
+        "note": "city flood model areas at their depth class, and a FloodNet sensor's deepest reading",
+        "areas": [
+            {"geometry": feature["geometry"], "depth_m": FLOOD_DEPTH_M.get(feature["properties"]["category"], 0.3),
+             "label": feature["properties"]["label"]}
+            for feature in layers["flood"]["features"] if feature["properties"]["scenario"] == scenario
+        ],
+        "gauge": {
+            "lon": gauge_point["properties"]["lon"], "lat": gauge_point["properties"]["lat"],
+            "depth_m": gauge_point["properties"]["height"], "label": gauge_point["properties"]["label"],
+        } if gauge_point else None,
+    }
+
+
 def run_folder(name: str) -> Path:
     path = OUTPUT / name
     if not re.fullmatch(r"[\w.-]+", name) or not (path / "result.json").is_file():
@@ -388,28 +411,12 @@ def create_app(state: State | None = None) -> FastAPI:
         result.setdefault("topic_label", TOPICS[result["topic"]].label if result["topic"] in TOPICS else result["topic"])
         return {"name": name, "result": result, "explanation": explanation, "map": map_layers(result, explanation, state.store)}
 
-    @app.get("/api/runs/{name}/flood3d.json")
-    def flood3d(name: str, scenario: str = "moderate_current") -> JSONResponse:
-        """A flooding run's flood records for Valdrada's overlay (city_investigator.valdrada_flood): the model's
-        areas with the depth of their class, and the nearest sensor's deepest reading."""
+    @app.get("/api/runs/{name}/scene3d.json")
+    def scene3d(name: str, scenario: str = "moderate_current") -> JSONResponse:
+        """What City Investigator's add-on draws in Valdrada for a run (city_investigator.scene3d)."""
         result = json.loads((run_folder(name) / "result.json").read_text())
-        layers = map_layers(result, None, state.store)
-        location = result["photo"]["location"]
-        gauge_point = next(iter(layers["gauge"]["features"]), None)
-        body = {
-            "center": {"lat": location["lat"], "lon": location["lon"]},
-            "scenario": scenario,
-            "note": "city flood model areas at their depth class, and a FloodNet sensor's deepest reading",
-            "areas": [
-                {"geometry": feature["geometry"], "depth_m": FLOOD_DEPTH_M.get(feature["properties"]["category"], 0.3),
-                 "label": feature["properties"]["label"]}
-                for feature in layers["flood"]["features"] if feature["properties"]["scenario"] == scenario
-            ],
-            "gauge": {
-                "lon": gauge_point["properties"]["lon"], "lat": gauge_point["properties"]["lat"],
-                "depth_m": gauge_point["properties"]["height"], "label": gauge_point["properties"]["label"],
-            } if gauge_point else None,
-        }
+        store = state.store
+        body = scene(result, store.buildings if store else None, flood_layer(result, store, scenario))
         # Valdrada runs on its own port on this computer and fetches this from there.
         return JSONResponse(body, headers={"Access-Control-Allow-Origin": "*"})
 

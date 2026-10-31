@@ -410,7 +410,8 @@ async def investigate_photo(
         "question_moment": times.to_local(when).strftime("%Y-%m-%d %H:%M"),
         "radius_m": radius,
         "photo": photo.describe() | {"faces_and_plates_blurred_here": blurred},
-        "observations": [item.to_dict() for item in observations],
+        # with SAM 3.1's boxes, so the 3D view can place what the photo shows (city_investigator.scene3d)
+        "observations": [item.to_dict() | {"boxes": item.raw.get("boxes", [])} for item in observations],
         "not_seen": not_seen,
         "records": [hit.evidence.to_dict(hit.distance_m) for hit in hits],
         "coverage": [item.to_dict() for item in coverage],

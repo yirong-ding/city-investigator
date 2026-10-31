@@ -175,20 +175,21 @@ def test_district_overview_shows_the_last_batch(client, tmp_path, monkeypatch):
     assert point["properties"]["label"] == "Street trees" and point["geometry"]["coordinates"] == [SHED[1], SHED[0]]
 
 
-def test_valdrada_gets_a_flood_runs_water_and_sensor_reading(client, tmp_path):
+def test_valdrada_gets_a_runs_scene_with_the_flood_water_and_sensor_reading(client, tmp_path):
     run = tmp_path / "runs" / "20261030-130000-123"
     run.mkdir(parents=True)
     run.joinpath("result.json").write_text(json.dumps({
-        "topic": "flooding", "radius_m": 150, "flags": [], "records": [],
+        "topic": "flooding", "radius_m": 150, "flags": [], "records": [], "observations": [],
         "photo": {"location": {"lat": CORNER[0], "lon": CORNER[1], "uncertainty_m": 10}},
         "recurrence": {"floodnet": {"deepest_in": 35.94}},
     }))
-    response = client.get(f"/api/runs/{run.name}/flood3d.json")
+    response = client.get(f"/api/runs/{run.name}/scene3d.json")
     assert response.headers["access-control-allow-origin"] == "*"  # Valdrada fetches it from its own port
     data = response.json()
-    assert {area["depth_m"] for area in data["areas"]} == {0.2, 0.45}  # the model's two classes near the corner
-    assert data["gauge"]["depth_m"] == 0.91 and data["center"] == {"lat": CORNER[0], "lon": CORNER[1]}
-    assert client.get(f"/api/runs/{run.name}/flood3d.json?scenario=moderate_2050").json()["areas"] == []  # not in this store
+    assert {area["depth_m"] for area in data["flood"]["areas"]} == {0.2, 0.45}  # the model's two classes near the corner
+    assert data["flood"]["gauge"]["depth_m"] == 0.91 and data["center"] == {"lat": CORNER[0], "lon": CORNER[1]}
+    assert data["sheds"] == data["facades"] == data["seen"] == []  # no footprints in this store
+    assert client.get(f"/api/runs/{run.name}/scene3d.json?scenario=moderate_2050").json()["flood"]["areas"] == []
 
 
 def test_the_flood_overlay_installs_into_valdrada_once(tmp_path):

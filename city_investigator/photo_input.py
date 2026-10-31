@@ -7,6 +7,7 @@ metadata. The location is only a hint until the person confirms it.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -39,6 +40,7 @@ class Photo:
     page_url: str | None = None
     already_blurred: bool = False
     heading_deg: float | None = None  # the camera's compass direction, when the source records it
+    fov_deg: float | None = None  # the photo's horizontal field of view; 360 for a panorama
 
     def describe(self) -> dict[str, Any]:
         return {
@@ -58,7 +60,21 @@ class Photo:
             "page_url": self.page_url,
             "faces_and_plates": "blurred by Mapillary" if self.already_blurred else "blurred here",
             "heading_deg": self.heading_deg,
+            "fov_deg": self.fov_deg,
         }
+
+
+def field_of_view(meta: dict[str, Any], size: tuple[int, int]) -> float | None:
+    """Horizontal field of view in degrees: 360 for a panorama; for a perspective camera, from Mapillary's
+    calibration, whose focal length is a share of the photo's longer side."""
+    kind = meta.get("camera_type") or "perspective"
+    if meta.get("is_pano") or kind in ("spherical", "equirectangular"):
+        return 360.0
+    focal = (meta.get("camera_parameters") or [None])[0]
+    if kind != "perspective" or not isinstance(focal, (int, float)) or focal <= 0:
+        return None
+    width, height = size
+    return round(math.degrees(2 * math.atan(width / (2 * focal * max(width, height)))), 1)
 
 
 def from_mapillary(photo_id: str, token: str) -> Photo:
@@ -83,6 +99,7 @@ def from_mapillary(photo_id: str, token: str) -> Photo:
         already_blurred=True,
         heading_deg=next((float(value) for value in (meta.get("computed_compass_angle"), meta.get("compass_angle"))
                           if isinstance(value, (int, float))), None),
+        fov_deg=field_of_view(meta, size),
     )
 
 

@@ -409,6 +409,7 @@ async function sceneGroup(streamer, url) {
     const rings = ringsOfItem(item);
     await until(() => loaded(streamer, rings[0][0]), 30);
     const walls = streetWalls(streamer, rings);
+    if (!walls.length) console.warn(`[city-investigator] ${item.label}, ${item.address || 'a building'}: no wall faces a sidewalk here`);
     for (const w of walls) group.add(shedAlong(props, streamer, w, COLORS.record).group);
     permitted.push(...walls);
     const front = walls.sort((p, q) => q.length - p.length)[0];
@@ -434,6 +435,7 @@ async function sceneGroup(streamer, url) {
     const rings = ringsOfItem(item);
     await until(() => loaded(streamer, rings[0][0]), 30);
     const walls = streetWalls(streamer, rings);
+    if (!walls.length) console.warn(`[city-investigator] ${item.label}, ${item.address || 'a building'}: no wall faces a sidewalk here`);
     const height = item.height_m || 12;
     group.add(facadeWash(streamer, walls, height, COLORS.unsafe));
     const front = walls.sort((p, q) => q.length - p.length)[0];

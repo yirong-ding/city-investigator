@@ -11,6 +11,7 @@ screen. Every item is a record or a SAM 3.1 detection and is labeled as one:
 
 from __future__ import annotations
 
+import json
 import math
 from datetime import datetime, timezone
 from typing import Any
@@ -180,3 +181,30 @@ def scene(result: dict[str, Any], buildings: Buildings | None, flood: dict[str, 
         "facades": unsafe_facades(result, buildings),
         "seen": seen_structures(result, buildings),
     }
+
+
+def main() -> None:
+    """The investigations with something for Valdrada to draw, most first, with a link that opens each."""
+    from city_investigator.investigate import OUTPUT
+    from city_investigator.store import Store
+
+    store = Store.load()
+    rows = []
+    for path in OUTPUT.glob("*/result.json"):
+        result = json.loads(path.read_text())
+        drawn = scene(result, store.buildings, None)
+        counts = (len(drawn["sheds"]), len(drawn["seen"]), len(drawn["facades"]), result["topic"] == "flooding")
+        boxes = any("boxes" in item for item in result.get("observations", []))
+        where = next((item["address"] for kind in ("sheds", "facades") for item in drawn[kind] if item.get("address")), "")
+        rows.append((counts, path.parent.name, result.get("topic_label") or result["topic"], where, boxes))
+    rows.sort(key=lambda row: (-sum(row[0][:3]), -row[0][3], row[1]))
+    for (sheds, seen, facades, flood), name, topic, where, boxes in rows:
+        parts = [f"{sheds} permitted shed(s)", f"{seen} seen in the photo" if boxes else "photo: run again to place it",
+                 f"{facades} unsafe façade(s)"] + (["flood water"] if flood else [])
+        print(f"{topic}{f' at {where}' if where else ''}: {', '.join(parts)}\n    http://127.0.0.1:8000/#run={name}")
+    if not rows:
+        print(f"No investigations in {OUTPUT}.")
+
+
+if __name__ == "__main__":
+    main()

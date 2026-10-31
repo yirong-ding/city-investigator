@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from test_buildings import LAT, LON, at, footprint
 
@@ -95,3 +97,21 @@ def test_mapillary_calibration_gives_the_field_of_view():
     assert field_of_view({"camera_type": "perspective", "camera_parameters": [0.5, 0, 0]}, (2048, 1536)) == 90
     assert field_of_view({"camera_type": "fisheye", "camera_parameters": [0.5, 0, 0]}, (2048, 1536)) is None
     assert field_of_view({}, (2048, 1536)) is None
+
+
+def test_the_list_shows_what_each_investigation_draws(tmp_path, monkeypatch, capsys):
+    from city_investigator import investigate, scene3d
+    from city_investigator.store import Store
+
+    folder = tmp_path / "20261031-100000-1"
+    folder.mkdir()
+    flag = {"type": "facade_unsafe_unprotected", "severity": "conflict", "message": "", "evidence_ids": ["fisp:9"]}
+    filing = {"id": "fisp:9", "category": "facade_filing", "bbl": "3009670020", "start": moment("2024-05-01"), "address": "9 B ST"}
+    folder.joinpath("result.json").write_text(json.dumps(run(flags=[flag], records=[filing]) | {"topic_label": "Unsafe façades"}))
+    monkeypatch.setattr(investigate, "OUTPUT", tmp_path)
+    monkeypatch.setattr(Store, "load", classmethod(lambda cls, *a, **k: type("S", (), {"buildings": Buildings.from_rows([WIDE, SMALL])})()))
+    scene3d.main()
+    assert capsys.readouterr().out == (
+        "Unsafe façades at 9 B ST: 0 permitted shed(s), 0 seen in the photo, 1 unsafe façade(s)\n"
+        "    http://127.0.0.1:8000/#run=20261031-100000-1\n"
+    )

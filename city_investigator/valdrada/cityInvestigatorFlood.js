@@ -5,6 +5,9 @@
 // and the nearest FloodNet sensor's deepest reading. The areas become Valdrada's own river water standing that depth
 // above the street, sinking under the curb at their edges; the reading, a marker pole of its height at the sensor.
 // It shows records, not a simulation of water.
+//
+// Framed by the City Investigator page, it also takes that page's messages once loaded: another place moves the camera
+// and swaps the records, so the city is not loaded again (a reload compiles every shader again, minutes on some computers).
 import * as THREE from 'three';
 import { project } from '../shared/geo.js';
 
@@ -76,16 +79,34 @@ export function waterSheet(depths, groundAt, cell = CELL) {
   return { positions: new Float32Array(positions), indices: new Uint32Array(indices) };
 }
 
-async function waterMaterial() {
-  try {
-    return (await import('../world/materials.js')).makeWaterMaterial();   // Valdrada's own rivers: ripples, sky, sun
-  } catch (e) {
-    console.warn('[city-investigator] Valdrada water material unavailable, plain water instead', e);
-    return new THREE.MeshStandardMaterial({ color: 0x3d5650, roughness: 0.08 });
-  }
+// One water material for every overlay, so its shader compiles once.
+let water = null;
+function waterMaterial() {
+  water ??= import('../world/materials.js')
+    .then((m) => m.makeWaterMaterial())   // Valdrada's own rivers: ripples, sky, sun
+    .catch((e) => {
+      console.warn('[city-investigator] Valdrada water material unavailable, plain water instead', e);
+      return new THREE.MeshStandardMaterial({ color: 0x3d5650, roughness: 0.08 });
+    });
+  return water;
+}
+
+async function dispose(group) {
+  const shared = await water;
+  group.traverse((part) => {
+    part.geometry?.dispose();
+    if (part.material && part.material !== shared) part.material.dispose();
+  });
 }
 
 export async function addFloodOverlay(scene, streamer, url) {
+  const group = await floodOverlay(streamer, url);
+  scene.add(group);
+  return group;
+}
+
+// The records around one place as a group, not yet in the scene.
+async function floodOverlay(streamer, url) {
   const data = await (await fetch(url)).json();
   const [cx, cz] = project(data.center.lon, data.center.lat);
   for (let i = 0; i < WAIT_S && streamer.terrainAt(cx, cz) === null; i++) await sleep(1000);
@@ -117,7 +138,44 @@ export async function addFloodOverlay(scene, streamer, url) {
     mark.position.set(gx, ground + height, gz);
     group.add(pole, mark);
   }
-  scene.add(group);
   console.log(`[city-investigator] flood overlay: ${depths.size} m² of water${data.gauge ? ', sensor marker' : ''} (${data.note})`);
   return group;
+}
+
+// Called once at boot (the hook in main.js): draws ?flood=<url>, and when Valdrada is framed, takes the framing page's
+// {type: 'city-investigator:view', x, z, y, yaw, pitch, rain, flood} to move there, with y over the ground there.
+export function connect(scene, streamer, controllerOf, floodUrl) {
+  let overlay = null, latest = 0, pending = null;
+  const warn = (e) => console.warn('[city-investigator] flood overlay unavailable', e);
+  const showFlood = async (url) => {
+    const mine = ++latest;
+    if (overlay) { scene.remove(overlay); dispose(overlay); overlay = null; }
+    if (!url) return;
+    const group = await floodOverlay(streamer, url);
+    if (mine !== latest) { dispose(group); return; }   // another place was asked for meanwhile
+    scene.add(group);
+    overlay = group;
+  };
+  if (floodUrl) showFlood(floodUrl).catch(warn);
+  if (window.parent === window) return;
+  const move = () => {
+    const camera = controllerOf();   // null until Valdrada's boot makes it
+    if (!pending || !camera?.pos) return;
+    const view = pending;
+    pending = null;
+    camera.pos.set(view.x, camera.pos.y, view.z);
+    camera.relY = view.y;   // the fly camera (?fly=1) stands at this height over the ground once the ground has streamed in
+    camera.yaw = view.yaw;
+    camera.pitch = view.pitch;
+  };
+  setInterval(move, 250);
+  addEventListener('message', (event) => {
+    const view = event.data;
+    if (event.source !== window.parent || view?.type !== 'city-investigator:view') return;
+    pending = view;
+    move();
+    if (window.__GFX && typeof view.rain === 'number') window.__GFX.rain = view.rain;   // Valdrada's weather eases to it
+    showFlood(view.flood).catch(warn);
+  });
+  window.parent.postMessage({ type: 'city-investigator:ready' }, '*');
 }

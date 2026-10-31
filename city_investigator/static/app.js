@@ -39,6 +39,7 @@ const state = {
   view3d: false, mode: 'run',
   map: null, marker: null, photo: null, pin: null, run: null, confirming: false,
   scenario: 'moderate_current', source: null, nextEvent: 0, started: 0, timer: null, highlighted: [],
+  valdradaReady: false, valdradaPlace: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -260,6 +261,7 @@ function renderLegend(data) {
             state.scenario = scenario;
             for (const layer of ['flood', 'flood3d']) state.map?.setFilter(layer, ['==', ['get', 'scenario'], scenario]);
             renderLegend(data);
+            if (document.querySelector('.stage').dataset.view === 'valdrada') showStage('valdrada');  // its water too
           },
         }));
       }
@@ -318,12 +320,24 @@ function apply3d(move) {
 
 // Valdrada: the same spot in the 3D city, standing at eye height and facing the photo's direction.
 
-function valdradaLink(map, base) {
+function valdradaPlace(map) {
   const { lat, lon } = map.pin;
   const metersPerDegLon = 111320 * Math.cos((VALDRADA_ORIGIN.lat * Math.PI) / 180);
-  const x = (lon - VALDRADA_ORIGIN.lon) * metersPerDegLon;
-  const z = -(lat - VALDRADA_ORIGIN.lat) * 111132;
-  const yaw = typeof map.heading_deg === 'number' ? (-map.heading_deg * Math.PI) / 180 : 0;  // yaw 0 looks north, turning left
+  const flooding = state.run?.result?.topic === 'flooding';
+  return {
+    x: +((lon - VALDRADA_ORIGIN.lon) * metersPerDegLon).toFixed(1),
+    z: +(-(lat - VALDRADA_ORIGIN.lat) * 111132).toFixed(1),
+    y: 1.7,
+    yaw: typeof map.heading_deg === 'number' ? +((-map.heading_deg * Math.PI) / 180).toFixed(3) : 0,  // 0 looks north, turning left
+    pitch: 0,
+    rain: flooding ? 1 : 0,
+    // The flood model's water and the sensor's deepest reading, drawn by City Investigator's add-on to Valdrada
+    // (python -m city_investigator.valdrada_flood); without the add-on Valdrada ignores it.
+    flood: flooding ? `${location.origin}/api/runs/${encodeURIComponent(state.run.name)}/flood3d.json?scenario=${state.scenario}` : null,
+  };
+}
+
+function valdradaLink(place, base) {
   // Light settings, for a look at one place. Valdrada loads full detail only around the camera: its low tier (600 m;
   // not less, as its loading screen waits for more than 4 detail tiles, and 300 m can hold only 4), the rest of the
   // city in its coarse far tier, without the backdrop beyond the city's edge (lodbd=0); no traffic or pedestrians
@@ -331,17 +345,19 @@ function valdradaLink(map, base) {
   // fly=1: Valdrada's fly camera, the one that reads y relative to its own ground (rel=1); its default drone takes y
   // as height above sea level, so 1.7 m can sit at or under the street where the ground is a few meters up.
   const query = new URLSearchParams({
-    x: x.toFixed(1), z: z.toFixed(1), y: '1.7', rel: '1', fly: '1', yaw: yaw.toFixed(3), pitch: '0', hud: '0',
-    tier: 'low', lodbd: '0', nosim: '1', lmwait: '5',
+    x: place.x.toFixed(1), z: place.z.toFixed(1), y: String(place.y), rel: '1', fly: '1', yaw: place.yaw.toFixed(3),
+    pitch: String(place.pitch), hud: '0', tier: 'low', lodbd: '0', nosim: '1', lmwait: '5',
   });
-  if (state.run?.result?.topic === 'flooding') {
-    query.set('rain', '1');
-    // The flood model's water and the sensor's deepest reading, drawn by City Investigator's add-on to Valdrada
-    // (python -m city_investigator.valdrada_flood); without the add-on Valdrada ignores it.
-    query.set('flood', `${location.origin}/api/runs/${encodeURIComponent(state.run.name)}/flood3d.json?scenario=${state.scenario}`);
-  }
+  if (place.rain) query.set('rain', String(place.rain));
+  if (place.flood) query.set('flood', place.flood);
   return `${base}/?${query}`;
 }
+
+// Loading Valdrada compiles hundreds of shaders, so the frame loads it once. Its add-on then says it is ready, and
+// another place, or another flood scenario, goes to it as a message: the camera moves and the records are swapped.
+addEventListener('message', (event) => {
+  if (event.origin === VALDRADA && event.data?.type === 'city-investigator:ready') state.valdradaReady = true;
+});
 
 // Highlighting: a claim or flag lights up the evidence it cites, on the map and the timeline.
 
@@ -538,7 +554,7 @@ function renderPhoto(data) {
     el('p', { class: 'meta', text: `Taken ${photo.taken_local} New York time. Faces and license plates ${photo.faces_and_plates}.` }),
     photo.credit ? el('p', { class: 'meta' }, photo.page_url ? el('a', { href: photo.page_url, target: '_blank', rel: 'noopener', text: photo.credit }) : photo.credit) : null,
     el('p', { class: 'meta' },
-      el('a', { href: valdradaLink(data.map, VALDRADA), target: '_blank', rel: 'noopener', text: 'See this spot in Valdrada' }),
+      el('a', { href: valdradaLink(valdradaPlace(data.map), VALDRADA), target: '_blank', rel: 'noopener', text: 'See this spot in Valdrada' }),
       ', the 3D city of New York, when it runs on this computer. Its streets are built from public records, but some '
       + 'details such as sidewalk sheds are placed at random, so it shows the place, not the evidence.'));
 }
@@ -807,8 +823,15 @@ function showStage(view) {
   document.querySelector('.stage').dataset.view = view;
   for (const button of document.querySelectorAll('.stage-switch button')) button.classList.toggle('on', button.dataset.view === view);
   if (view === 'valdrada') {
-    const link = valdradaLink(state.run.map, VALDRADA);
-    if ($('valdrada-frame').getAttribute('src') !== link) $('valdrada-frame').setAttribute('src', link);  // loads only when shown
+    const place = valdradaPlace(state.run.map);
+    const link = valdradaLink(place, VALDRADA);
+    const frame = $('valdrada-frame');
+    if (state.valdradaReady) {
+      if (JSON.stringify(place) !== state.valdradaPlace) frame.contentWindow.postMessage({ type: 'city-investigator:view', ...place }, VALDRADA);
+    } else if (frame.getAttribute('src') !== link) {
+      frame.setAttribute('src', link);  // loads only when first shown
+    }
+    state.valdradaPlace = JSON.stringify(place);
     $('valdrada-tab').href = link;
   } else {
     state.map?.resize();

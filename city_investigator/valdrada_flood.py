@@ -1,10 +1,12 @@
 """Install City Investigator's flood overlay into a local copy of Valdrada.
 
 Valdrada (github.com/mkturkcan/valdrada) has rain but no flood water. This copies one module,
-cityInvestigatorFlood.js, into its client/src/city/ and adds one line to client/src/main.js that
-loads it when the page is opened with ?flood=<url>. The page's Valdrada 3D view passes that URL
-for flooding investigations: the city flood model's areas at their depth class and the nearest
-sensor's deepest reading, drawn over Valdrada's ground. Running it again changes nothing.
+cityInvestigatorFlood.js, into its client/src/city/ and adds a hook to client/src/main.js that
+loads it at boot. The page's Valdrada 3D view passes ?flood=<url> for flooding investigations: the
+city flood model's areas at their depth class and the nearest sensor's deepest reading, drawn over
+Valdrada's ground. Once Valdrada has loaded in the page, the module also takes the page's messages,
+so another place moves the camera and swaps the records instead of loading the city again.
+Running it again changes nothing; it replaces an earlier version's hook.
 
 Usage:
   python -m city_investigator.valdrada_flood G:\\Projects\\valdrada
@@ -18,13 +20,24 @@ from pathlib import Path
 
 MODULE = Path(__file__).parent / "valdrada" / "cityInvestigatorFlood.js"
 ANCHOR = "  bootMark('tile manifest');"
-MARKER = "City Investigator: a run's flood records"
+TAG = "added by city_investigator.valdrada_flood"  # on the first line of every version of the hook
 HOOK = (
-    f"  // {MARKER} over the ground (?flood=<url>; added by city_investigator.valdrada_flood)\n"
-    "  if (Q.get('flood')) import('./city/cityInvestigatorFlood.js')\n"
-    "    .then((m) => m.addFloodOverlay(engine.scene, streamer, Q.get('flood')))\n"
-    "    .catch((e) => console.warn('flood overlay unavailable', e));\n"
+    f"  // City Investigator ({TAG}): a run's flood records over the ground (?flood=<url>), and the page that\n"
+    "  // frames Valdrada moving it to another place without loading the city again\n"
+    "  import('./city/cityInvestigatorFlood.js')\n"
+    "    .then((m) => m.connect(engine.scene, streamer, () => controller, Q.get('flood')))\n"
+    "    .catch((e) => console.warn('City Investigator add-on unavailable', e));\n"
 )
+
+
+def without_hook(text: str) -> str:
+    """main.js without an installed hook: from its tagged first line through its .catch line."""
+    lines = text.splitlines(keepends=True)
+    start = next((n for n, line in enumerate(lines) if TAG in line), None)
+    if start is None:
+        return text
+    end = next(n for n in range(start, len(lines)) if ".catch(" in lines[n])
+    return "".join(lines[:start] + lines[end + 1:])
 
 
 def install(valdrada: Path) -> list[str]:
@@ -38,13 +51,16 @@ def install(valdrada: Path) -> list[str]:
         shutil.copyfile(MODULE, target)
         done.append(f"copied {MODULE.name} to {target.parent}")
     text = main.read_bytes().decode("utf-8")
-    if MARKER not in text:
+    newline = "\r\n" if "\r\n" in text else "\n"  # a Windows checkout may use CRLF
+    hook = HOOK.replace("\n", newline)
+    if hook not in text:
+        earlier = TAG in text
+        text = without_hook(text)
         if text.count(ANCHOR) != 1:
             raise SystemExit("client/src/main.js has changed shape (no single tile-manifest line); the hook was not added.")
-        newline = "\r\n" if "\r\n" in text else "\n"  # a Windows checkout may use CRLF
         end = text.index("\n", text.index(ANCHOR)) + 1
-        main.write_bytes((text[:end] + HOOK.replace("\n", newline) + text[end:]).encode("utf-8"))
-        done.append("added the flood hook to client/src/main.js")
+        main.write_bytes((text[:end] + hook + text[end:]).encode("utf-8"))
+        done.append(f"{'updated' if earlier else 'added'} the City Investigator hook in client/src/main.js")
     return done
 
 

@@ -6,6 +6,18 @@ Built for the Meta Global AI Developer Hackathon (Oct 26 to Nov 4, 2026).
 
 > **Status:** Day 5. Nine kinds of street problems, a web page that runs the whole investigation and streams each step, and an answer whose every claim links to its evidence on a map and a timeline. Findings so far are in [`smoke/FINDINGS.md`](smoke/FINDINGS.md).
 
+![City Investigator's framework: a street photo and public records become evidence, Muse Spark reasons over it with tools and writes labeled claims a code checker verifies, and the result shows as an answer page, a 3D city before and after the proposals, and a district overview](docs/framework.svg)
+
+## The framework in five ideas
+
+The letters match the badges in the figure.
+
+- **A. Records against reality, aware of their blind spots.** Rule checks compare what the photo shows with what the records say at that place and time, and flag where they agree, where they disagree, and where there is a gap. Every source carries a note on what it cannot see, so silence in the records is never read as "nothing happened".
+- **B. Evidence, not guesses.** Muse Spark investigates with tools (it asks SAM 3.1 to look at the photo again, reads records, searches a building's history) and answers in labeled claims: observed, recorded, modeled, inferred, no coverage. A code checker drops any claim that does not cite evidence of its kind, so what cannot be checked is not shown.
+- **C. Proposals grounded three ways.** Next steps go only through real channels (311 in the city's own wording, DEP programs, FloodNet, the community board), backed by precedents (how reports like this one ended across the district) and at most one sourced idea from elsewhere, labeled as not offered here yet. No proposal may promise a result.
+- **D. Needs at stake.** Each investigation is tagged with the needs it bears on in Jan Gehl's quality criteria for public space: protection, comfort, enjoyment.
+- **E. A twin that shows before and after honestly.** The evidence is placed in a 3D city (Valdrada): permitted sheds, scaffolding seen in the photo, unsafe façades, flood water, pins for the records cited. After draws the proposals as illustrations with their real scale (rain gardens hold under 1% of the modeled flood around Carroll Street) instead of a prediction nobody made.
+
 ## What it does
 
 1. You upload a street photo in New York City (or pick a block on the map) and confirm where it was taken.

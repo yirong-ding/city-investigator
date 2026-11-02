@@ -547,38 +547,42 @@ function curbFrom(streamer, x, z) {
   return best;
 }
 
-// A sidewalk, not a median: walking away from the curb reaches a building or a lot before any roadway.
+// A sidewalk, not a median: walking away from the curb, no roadway within 12 m before a building, a lot or the end.
 function besideLots(streamer, x, z, d) {
   for (let s = 0.5; s <= 12; s += 0.5) {
     const info = streamer.surfaceInfoAt(x - d[0] * s, z - d[1] * s);
     if (!info) return true;
     if (info.road) return false;
   }
-  return false;
+  return true;
 }
 
 // Where rain gardens could go around a low spot: sidewalk along a curb, on ground higher than the spot (water runs
 // down to it) where there is any, nearer first, at least 15 m apart; each set back 0.3 m from the curb.
 function gardenSpots(streamer, cx, cz) {
   const base = streamer.terrainAt(cx, cz) ?? 0;
-  const candidates = [];
+  const candidates = [], rejected = { notSidewalk: 0, noCurb: 0, median: 0, corners: 0 };
   for (const r of [10, 16, 22, 28, 34, 40]) {
     for (let a = 0; a < 360; a += 10) {
       const x = cx + r * Math.sin((a * Math.PI) / 180), z = cz + r * Math.cos((a * Math.PI) / 180);
-      const curb = WALK.has(streamer.surfaceInfoAt(x, z)?.kind) ? curbFrom(streamer, x, z) : null;
-      if (!curb || !besideLots(streamer, x, z, curb.d)) continue;
+      if (!WALK.has(streamer.surfaceInfoAt(x, z)?.kind)) { rejected.notSidewalk++; continue; }
+      const curb = curbFrom(streamer, x, z);
+      if (!curb) { rejected.noCurb++; continue; }
+      if (!besideLots(streamer, x, z, curb.d)) { rejected.median++; continue; }
       const shift = curb.s - 0.3 - GARDEN[1] / 2;
       const [gx, gz] = [x + curb.d[0] * shift, z + curb.d[1] * shift];
       const along = [curb.d[1], -curb.d[0]];
       const corners = [[1, 1], [1, -1], [-1, 1], [-1, -1]].map(([u, v]) => [
         gx + along[0] * u * GARDEN[0] / 2 + curb.d[0] * v * GARDEN[1] / 2, gz + along[1] * u * GARDEN[0] / 2 + curb.d[1] * v * GARDEN[1] / 2]);
-      if (!corners.every(([qx, qz]) => WALK.has(streamer.surfaceInfoAt(qx, qz)?.kind))) continue;
+      // its corners on the sidewalk or the curbside strip's tree pits and beds, where DEP builds them; not the road
+      if (!corners.every(([qx, qz]) => { const info = streamer.surfaceInfoAt(qx, qz); return info && !info.road; })) { rejected.corners++; continue; }
       candidates.push({ x: gx, z: gz, r, higher: (streamer.terrainAt(gx, gz) ?? base) > base + 0.05, d: curb.d });
     }
   }
   candidates.sort((p, q) => q.higher - p.higher || p.r - q.r);
   const spots = [];
   for (const c of candidates) if (spots.length < GARDENS && spots.every((s) => Math.hypot(s.x - c.x, s.z - c.z) > 15)) spots.push(c);
+  console.log(`[city-investigator] rain gardens: ${candidates.length} possible spots, ${spots.length} placed; passed over: ${Object.entries(rejected).map(([why, n]) => `${why} ${n}`).join(', ')}`);
   return spots;
 }
 
@@ -676,7 +680,8 @@ async function sceneGroup(streamer, url) {
     await until(() => loaded(streamer, project(...item.at)), 30);
     group.add(pinFor(streamer, item, place));
   }
-  console.log(`[city-investigator] scene: ${data.markers?.length || 0} record pins, ${data.sheds?.length || 0} permitted sheds, ${data.seen?.length || 0} seen in the photo, ${data.facades?.length || 0} unsafe façades${data.flood ? ', flood' : ''}`);
+  const run = decodeURIComponent((url.match(/runs\/([^/]+)\//) || [])[1] || '');
+  console.log(`[city-investigator] scene of run ${run}: ${data.markers?.length || 0} record pins, ${data.sheds?.length || 0} permitted sheds, ${data.seen?.length || 0} seen in the photo, ${data.facades?.length || 0} unsafe façades${data.flood ? ', flood' : ''}`);
   group.add(await afterGroup(streamer, data.after || [], props, place, permitted, flood?.userData.nearM3 ?? null));
   return group;
 }
@@ -734,5 +739,7 @@ export function connect({ scene, streamer, instancer, camera: controllerOf }, sc
     if (window.__GFX && typeof view.rain === 'number') window.__GFX.rain = view.rain;   // Valdrada's weather eases to it
     showScene(view.scene).catch(warn);
   });
-  window.parent.postMessage({ type: 'city-investigator:ready', version: VERSION }, '*');   // the page warns of an old add-on
+  // the version (the page warns of an old add-on) and the scene it booted with: a Valdrada that reloaded on its own
+  // (its server restarted) comes back with the run it was first opened on, and the page sends the one on screen
+  window.parent.postMessage({ type: 'city-investigator:ready', version: VERSION, scene: sceneUrl }, '*');
 }

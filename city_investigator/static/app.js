@@ -359,6 +359,11 @@ function valdradaLink(place, base, { after = state.after } = {}) {
 addEventListener('message', (event) => {
   if (event.origin !== VALDRADA || event.data?.type !== 'city-investigator:ready') return;
   state.valdradaReady = true;
+  if (state.run) {   // a Valdrada that reloaded on its own comes back with the run it was first opened on
+    const place = valdradaPlace(state.run.map);
+    if (event.data.scene !== place.scene) $('valdrada-frame').contentWindow.postMessage({ type: 'city-investigator:view', ...place }, VALDRADA);
+    state.valdradaPlace = JSON.stringify(place);
+  }
   // Valdrada keeps serving the add-on it started with: a newer one needs the installer and a restart of Valdrada
   api('/api/addon').then(({ version }) => { $('valdrada-stale').hidden = !version || event.data.version === version; }).catch(() => {});
   if (state.after) setAfter(true);

@@ -7,6 +7,8 @@ screen. Every item is a record or a SAM 3.1 detection and is labeled as one:
   standing, so this is what was authorized, drawn with Valdrada's own shed model on the building's street side);
 - facades: buildings whose latest façade filing before the photo is UNSAFE (from the run's flags);
 - seen: scaffolding SAM 3.1 found in the photo, along the building front that its box points at from the camera;
+- markers: the records the flags and the answer rest on (complaints, inspections, orders, inventory trees), as pins
+  in the page's colors for their kind;
 - after: the explanation's proposals, at the records they cite, with how the After view illustrates each action done
   (city_investigator.actions: rain gardens, the shed an unsafe façade must have, a young tree); an illustration, not a
   design or a prediction.
@@ -17,10 +19,11 @@ from __future__ import annotations
 import json
 import math
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 
 from city_investigator.actions import ACTIONS
 from city_investigator.buildings import Building, Buildings
+from city_investigator.geo import distance_m
 
 SHED_LABELS = {"shed_permit": "Shed permit", "scaffold_permit": "Scaffold permit"}
 UNSAFE_FLAGS = {"facade_unsafe_protected", "facade_unsafe_unprotected"}
@@ -28,6 +31,16 @@ SEEN_AS_SHED = {"seen_scaffolding"}
 DEFAULT_FOV_DEG = 65.0  # a phone's main camera, when the photo does not say
 SIGHT_M = 50.0  # a line of sight from the camera is followed this far to a building front
 MIN_SPAN_M = 3.0  # Valdrada's shortest shed
+MARKER_M, MAX_MARKERS = 150, 12  # pins for cited records this close to the pin, nearest first
+PIN_GROUPS = {  # the page's names and colors for kinds of record (static/app.js GROUPS)
+    "complaint": ("311 complaint", "#d9480f"),
+    "permit": ("Permit or license", "#5f3dc4"),
+    "agency": ("Agency inspection, order or filing", "#1971c2"),
+    "inventory": ("City inventory", "#2b8a3e"),
+    "sensor": ("FloodNet flood", "#0b7285"),
+    "other": ("Record", "#495057"),
+}
+DRAWN_OTHERWISE = {"shed_permit", "scaffold_permit", "facade_filing", "ground_elevation"}
 
 
 def moment(value: dict[str, str] | str | None) -> datetime | None:
@@ -173,6 +186,35 @@ def seen_structures(result: dict[str, Any], buildings: Buildings) -> list[dict[s
     return seen
 
 
+def markers(
+    result: dict[str, Any], explanation: dict[str, Any] | None, group_of: Callable[[dict[str, Any]], str],
+) -> list[dict[str, Any]]:
+    """The records the flags and the answer cite, as pins at their places, nearest first. Sheds and façades are drawn
+    as such; rain gauges and lots describe areas; a flood's sensor has its marker pole."""
+    cited = {eid for flag in result.get("flags", []) for eid in flag.get("evidence_ids", [])}
+    cited |= {eid for claim in (explanation or {}).get("claims", []) for eid in claim.get("evidence_ids", [])}
+    location = result["photo"]["location"]
+    pins: dict[str, dict[str, Any]] = {}
+    for record in [*result["records"], *((explanation or {}).get("evidence") or {}).values()]:
+        rid, lat, lon = record.get("id"), record.get("lat"), record.get("lon")
+        if rid not in cited or rid in pins or lat is None or lon is None or record.get("category") in DRAWN_OTHERWISE:
+            continue
+        group = group_of(record)
+        if record.get("kind", record.get("type")) in ("observation", "model", "photo") or group in ("rain", "lot") \
+                or (group == "sensor" and result["topic"] == "flooding"):
+            continue
+        meters = distance_m(location["lat"], location["lon"], lat, lon)
+        if meters > MARKER_M:
+            continue
+        name, color = PIN_GROUPS.get(group, PIN_GROUPS["other"])
+        when = day(record.get("start")) or record.get("date") or ""
+        pins[rid] = {
+            "id": rid, "at": [lon, lat], "title": f"{name}, {when}" if when else name, "text": record.get("summary") or "",
+            "color": color, "distance_m": round(meters),
+        }
+    return sorted(pins.values(), key=lambda pin: pin["distance_m"])[:MAX_MARKERS]
+
+
 def after_view(result: dict[str, Any], explanation: dict[str, Any] | None, buildings: Buildings) -> list[dict[str, Any]]:
     """The proposals that passed the explanation's checks, each where the findings it cites are."""
     if not explanation:
@@ -204,7 +246,7 @@ def after_view(result: dict[str, Any], explanation: dict[str, Any] | None, build
 
 def scene(
     result: dict[str, Any], buildings: Buildings | None, flood: dict[str, Any] | None,
-    explanation: dict[str, Any] | None = None,
+    explanation: dict[str, Any] | None = None, group_of: Callable[[dict[str, Any]], str] = lambda record: "other",
 ) -> dict[str, Any]:
     location = result["photo"]["location"]
     when = moment(result["photo"].get("taken_at")) or datetime.now(timezone.utc)
@@ -216,6 +258,7 @@ def scene(
         "sheds": record_sheds(result["records"], buildings, when),
         "facades": unsafe_facades(result, buildings),
         "seen": seen_structures(result, buildings),
+        "markers": markers(result, explanation, group_of),
         "after": after_view(result, explanation, buildings),
     }
 

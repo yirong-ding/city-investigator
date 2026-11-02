@@ -137,3 +137,22 @@ def test_proposals_are_placed_at_what_they_cite_with_how_to_draw_them():
     assert gardens["draw"] == "rain_gardens" and gardens["at"] == [LON, LAT]  # around the low spot the photo shows
     assert board["draw"] is None and board["at"] == [complaint["lon"], complaint["lat"]] and board["text"] == "The board could raise it."
     assert scene(run(), buildings, None, None)["after"] == []
+
+
+def test_pins_mark_the_cited_records_near_the_place_nearest_first():
+    from city_investigator.web import group
+
+    near, far = at(8, 0), at(400, 0)
+    records = [
+        {"id": "311:1", "category": "pothole", "lat": near[0], "lon": near[1], "start": moment("2026-01-05"), "summary": "Pothole reported"},
+        {"id": "pothole_orders:2", "category": "pothole_repair", "lat": at(3, 0)[0], "lon": at(3, 0)[1], "start": moment("2026-01-09"), "summary": "Repaired"},
+        {"id": "311:3", "category": "pothole", "lat": far[0], "lon": far[1], "summary": "Far away"},
+        {"id": "311:4", "category": "pothole", "lat": near[0], "lon": near[1], "summary": "Not cited"},
+        {"id": "dobnow:5", "category": "shed_permit", "lat": near[0], "lon": near[1], "summary": "Drawn as a shed"},
+    ]
+    flag = {"type": "reported_and_seen", "severity": "agreement", "message": "", "evidence_ids": ["311:1", "311:3", "dobnow:5"]}
+    explanation = {"evidence": {}, "claims": [{"kind": "record", "text": "", "evidence_ids": ["pothole_orders:2"]}]}
+    pins = scene(run(flags=[flag], records=records), None, None, explanation, group)["markers"]
+    assert [pin["id"] for pin in pins] == ["pothole_orders:2", "311:1"]
+    assert pins[1]["title"] == "311 complaint, 2026-01-05" and pins[1]["color"] == "#d9480f" and pins[1]["distance_m"] == 8
+    assert pins[0]["title"].startswith("Agency inspection, order or filing")

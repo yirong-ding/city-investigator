@@ -11,6 +11,7 @@
 //   each wall that faces a sidewalk, as deep as the sidewalk;
 // - seen: scaffolding found in the photo, the same shed along the building front it was traced to from the camera;
 // - facades: buildings whose latest façade filing is UNSAFE, their street walls washed red;
+// - markers: the records the flags and the answer rest on, as pins in the page's color for their kind, each labeled;
 // - after: the explanation's proposals, shown when the page switches to After: each action done as an illustration
 //   (curbside rain gardens on the sidewalks around the low spot, the shed an unsafe façade must have, a young tree),
 //   or a label where the action has no picture. Not a design and not a prediction: the flood water stays as recorded.
@@ -412,6 +413,37 @@ function facadeWash(streamer, walls, height, color) {
   return group;
 }
 
+// A point on a walking or road surface: a record placed at its lot's middle can fall inside a building, and its pin
+// moves to the nearest sidewalk or street.
+function onFoot(streamer, x, z) {
+  if (streamer.surfaceInfoAt(x, z)) return [x, z];
+  for (let r = 1; r <= 25; r++) {
+    for (let k = 0; k < 16; k++) {
+      const [px, pz] = [x + r * Math.sin((k * Math.PI) / 8), z + r * Math.cos((k * Math.PI) / 8)];
+      if (streamer.surfaceInfoAt(px, pz)) return [px, pz];
+    }
+  }
+  return [x, z];
+}
+
+// A record's pin: a ring on the ground in its kind's color, a post, and its label; labels at one spot stack upward.
+function pinFor(streamer, item, stacked) {
+  const [x, z] = onFoot(streamer, ...project(...item.at));
+  const y = surfaceY(streamer, x, z);
+  const ring = own(new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 0.03, 32), new THREE.MeshBasicMaterial({
+    color: item.color, transparent: true, opacity: 0.75, toneMapped: false,
+  })));
+  ring.position.set(x, y + 0.02, z);
+  const post = own(new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 2.4, 8), new THREE.MeshBasicMaterial({ color: item.color, toneMapped: false })));
+  post.position.set(x, y + 1.2, z);
+  const key = `${Math.round(x / 3)},${Math.round(z / 3)}`;
+  const n = stacked.get(key) ?? 0;
+  stacked.set(key, n + 1);
+  const group = new THREE.Group();
+  group.add(ring, post, label([item.title, item.text], item.color, x, y + 2.6 + 2.4 * n, z));
+  return group;
+}
+
 // A curbside rain garden: a low stone rim round a planted bed, its long side along the curb (local x), the curb at +z.
 function rainGarden() {
   const group = new THREE.Group();
@@ -586,7 +618,12 @@ async function sceneGroup(streamer, url) {
       group.add(label([item.label, item.address], COLORS.unsafe, x, surfaceY(streamer, x, z) + Math.min(height, 14) + 1, z));
     }
   }
-  console.log(`[city-investigator] scene: ${data.sheds?.length || 0} permitted sheds, ${data.seen?.length || 0} seen in the photo, ${data.facades?.length || 0} unsafe façades${data.flood ? ', flood' : ''}`);
+  const stacked = new Map();
+  for (const item of data.markers || []) {
+    await until(() => loaded(streamer, project(...item.at)), 30);
+    group.add(pinFor(streamer, item, stacked));
+  }
+  console.log(`[city-investigator] scene: ${data.markers?.length || 0} record pins, ${data.sheds?.length || 0} permitted sheds, ${data.seen?.length || 0} seen in the photo, ${data.facades?.length || 0} unsafe façades${data.flood ? ', flood' : ''}`);
   group.add(await afterGroup(streamer, data.after || [], props));
   return group;
 }

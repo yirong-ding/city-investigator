@@ -422,7 +422,7 @@ def create_app(state: State | None = None) -> FastAPI:
         path = folder / "explanation.json"
         explanation = json.loads(path.read_text()) if path.is_file() else None
         store = state.store
-        body = scene(result, store.buildings if store else None, flood_layer(result, store, scenario), explanation)
+        body = scene(result, store.buildings if store else None, flood_layer(result, store, scenario), explanation, group)
         # Valdrada runs on its own port on this computer and fetches this from there.
         return JSONResponse(body, headers={"Access-Control-Allow-Origin": "*"})
 

@@ -359,6 +359,8 @@ function valdradaLink(place, base, { after = state.after } = {}) {
 addEventListener('message', (event) => {
   if (event.origin !== VALDRADA || event.data?.type !== 'city-investigator:ready') return;
   state.valdradaReady = true;
+  // Valdrada keeps serving the add-on it started with: a newer one needs the installer and a restart of Valdrada
+  api('/api/addon').then(({ version }) => { $('valdrada-stale').hidden = !version || event.data.version === version; }).catch(() => {});
   if (state.after) setAfter(true);
 });
 

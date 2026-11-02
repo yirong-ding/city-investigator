@@ -23,6 +23,7 @@
 import * as THREE from 'three';
 import { project } from '../shared/geo.js';
 
+const VERSION = 'source';   // stamped with the source's hash by city_investigator.valdrada_addon when installed
 const CELL = 1;        // meters between the water's samples
 const HALF = 450;      // meters around the place that are drawn
 const ROAD = 0.145;    // the street surface over Valdrada's base ground (main.js RS34)
@@ -546,6 +547,16 @@ function curbFrom(streamer, x, z) {
   return best;
 }
 
+// A sidewalk, not a median: walking away from the curb reaches a building or a lot before any roadway.
+function besideLots(streamer, x, z, d) {
+  for (let s = 0.5; s <= 12; s += 0.5) {
+    const info = streamer.surfaceInfoAt(x - d[0] * s, z - d[1] * s);
+    if (!info) return true;
+    if (info.road) return false;
+  }
+  return false;
+}
+
 // Where rain gardens could go around a low spot: sidewalk along a curb, on ground higher than the spot (water runs
 // down to it) where there is any, nearer first, at least 15 m apart; each set back 0.3 m from the curb.
 function gardenSpots(streamer, cx, cz) {
@@ -555,7 +566,7 @@ function gardenSpots(streamer, cx, cz) {
     for (let a = 0; a < 360; a += 10) {
       const x = cx + r * Math.sin((a * Math.PI) / 180), z = cz + r * Math.cos((a * Math.PI) / 180);
       const curb = WALK.has(streamer.surfaceInfoAt(x, z)?.kind) ? curbFrom(streamer, x, z) : null;
-      if (!curb) continue;
+      if (!curb || !besideLots(streamer, x, z, curb.d)) continue;
       const shift = curb.s - 0.3 - GARDEN[1] / 2;
       const [gx, gz] = [x + curb.d[0] * shift, z + curb.d[1] * shift];
       const along = [curb.d[1], -curb.d[0]];
@@ -684,6 +695,7 @@ function clearRandomSheds(instancer) {
 // {type: 'city-investigator:view', x, z, y, yaw, pitch, rain, scene} to move there, with y over the ground there, and
 // {type: 'city-investigator:after', on} to show the proposals or not (not by default; also when Valdrada is not framed).
 export function connect({ scene, streamer, instancer, camera: controllerOf }, sceneUrl) {
+  console.log(`[city-investigator] add-on version ${VERSION}`);
   let shown = null, latest = 0, pending = null, after = new URLSearchParams(location.search).get('after') === '1';
   const showAfter = () => { const part = shown?.getObjectByName?.('city-investigator-after'); if (part) part.visible = after; };
   const warn = (e) => console.warn('[city-investigator] scene unavailable', e);
@@ -722,5 +734,5 @@ export function connect({ scene, streamer, instancer, camera: controllerOf }, sc
     if (window.__GFX && typeof view.rain === 'number') window.__GFX.rain = view.rain;   // Valdrada's weather eases to it
     showScene(view.scene).catch(warn);
   });
-  window.parent.postMessage({ type: 'city-investigator:ready' }, '*');
+  window.parent.postMessage({ type: 'city-investigator:ready', version: VERSION }, '*');   // the page warns of an old add-on
 }

@@ -17,11 +17,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import shutil
+import hashlib
 from pathlib import Path
 
 MODULE = Path(__file__).parent / "valdrada" / "cityInvestigator.js"
 EARLIER_MODULES = ("cityInvestigatorFlood.js",)
+UNSTAMPED = "const VERSION = 'source';"  # the module's version line, stamped when it is copied
 ANCHOR = "  bootMark('tile manifest');"
 TAG = "added by city_investigator.valdrada_"  # on the first line of every version of the hook
 HOOK = (
@@ -31,6 +32,18 @@ HOOK = (
     "    .then((m) => m.connect({ scene: engine.scene, streamer, instancer, camera: () => controller }, Q.get('scene')))\n"
     "    .catch((e) => console.warn('City Investigator add-on unavailable', e));\n"
 )
+
+
+def version() -> str:
+    """The add-on's version: the start of its source's hash. The page compares it with the one Valdrada runs."""
+    return hashlib.sha1(MODULE.read_bytes()).hexdigest()[:10]
+
+
+def stamped() -> bytes:
+    """The module as installed, its version line stamped."""
+    text = MODULE.read_bytes().decode("utf-8")
+    assert text.count(UNSTAMPED) == 1, "cityInvestigator.js has lost its version line"
+    return text.replace(UNSTAMPED, f"const VERSION = '{version()}';").encode("utf-8")
 
 
 def without_hook(text: str) -> str:
@@ -55,9 +68,9 @@ def install(valdrada: Path) -> list[str]:
             earlier.unlink()
             done.append(f"removed the earlier {name}")
     target = valdrada / "client" / "src" / "city" / MODULE.name
-    if not target.is_file() or target.read_bytes() != MODULE.read_bytes():
-        shutil.copyfile(MODULE, target)
-        done.append(f"copied {MODULE.name} to {target.parent}")
+    if not target.is_file() or target.read_bytes() != stamped():
+        target.write_bytes(stamped())
+        done.append(f"copied {MODULE.name} (version {version()}) to {target.parent}")
     text = main.read_bytes().decode("utf-8")
     newline = "\r\n" if "\r\n" in text else "\n"  # a Windows checkout may use CRLF
     hook = HOOK.replace("\n", newline)

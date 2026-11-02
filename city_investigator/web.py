@@ -30,7 +30,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from city_investigator import batch, needs
+from city_investigator import batch, needs, valdrada_addon
 from city_investigator.explain import explain_run
 from city_investigator.geo import distance_m
 from city_investigator.investigate import OUTPUT, USER_UNCERTAINTY_M, investigate_photo, parse_local
@@ -374,6 +374,11 @@ def create_app(state: State | None = None) -> FastAPI:
         if job is None:
             raise HTTPException(404, "Unknown job.")
         return StreamingResponse(job.stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+
+    @app.get("/api/addon")
+    def addon() -> dict[str, str]:
+        """The version of the Valdrada add-on in this checkout; Valdrada reports the one it runs."""
+        return {"version": valdrada_addon.version()}
 
     @app.get("/api/batch")
     def batch_overview() -> dict[str, Any]:

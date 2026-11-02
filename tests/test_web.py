@@ -157,6 +157,12 @@ def test_flood_map_layers_show_the_model_and_skip_far_records(store):  # noqa: F
     assert all(f["properties"]["id"] == "stormwater:moderate_current" for f in flood)
 
 
+def test_the_page_learns_which_addon_version_to_expect(client):
+    from city_investigator import valdrada_addon
+
+    assert client.get("/api/addon").json() == {"version": valdrada_addon.version()} and len(valdrada_addon.version()) == 10
+
+
 def test_district_overview_shows_the_last_batch(client, tmp_path, monkeypatch):
     monkeypatch.setattr(web, "DERIVED_DIR", tmp_path / "derived")
     assert client.get("/api/batch").status_code == 404
@@ -209,6 +215,8 @@ def test_the_addon_installs_into_valdrada_once_and_replaces_an_earlier_one(tmp_p
     assert "bootMark('tile manifest');\r\n  // City Investigator" in text and "\r\n    .catch(" in text  # kept CRLF
     assert "m.connect({ scene: engine.scene, streamer, instancer, camera: () => controller }" in text and text.endswith("  next();\r\n}\r\n")
     assert (source / "city" / "cityInvestigator.js").read_text().startswith("// City Investigator's records over Valdrada")
+    installed = (source / "city" / "cityInvestigator.js").read_text()
+    assert f"const VERSION = '{valdrada_addon.version()}';" in installed and "'source'" not in installed  # stamped
     assert valdrada_addon.install(tmp_path / "valdrada") == []  # a second run changes nothing
 
     earlier = (  # the first version's hook, which loaded the module only for ?flood=

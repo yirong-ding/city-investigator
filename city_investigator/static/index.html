@@ -111,6 +111,11 @@
       <div id="legend" class="legend" hidden></div>
       <section id="valdrada" class="valdrada" aria-label="This spot in Valdrada, a 3D city of New York">
         <iframe id="valdrada-frame" title="This spot in Valdrada, a 3D city of New York" allow="fullscreen; pointer-lock; clipboard-write"></iframe>
+        <p class="valdrada-stale" id="valdrada-stale" role="status" hidden>
+          Valdrada is running an older City Investigator add-on. In the city-investigator window run
+          <code>python -m city_investigator.valdrada_addon</code> with Valdrada's folder, then restart Valdrada
+          (Ctrl+C, then <code>npm run dev</code>) and reload this page.
+        </p>
         <div class="after-switch toggle" id="after-switch" aria-label="Before or after the proposals" hidden>
           <button type="button" data-after="0" class="on">Before</button>
           <button type="button" data-after="1" title="Each proposal under What could be done, drawn as an illustration of the action done: not a design and not a prediction">After: proposals</button>

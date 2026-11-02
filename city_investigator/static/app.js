@@ -474,12 +474,21 @@ function selectTab(name) {
   for (const tab of document.querySelectorAll('.tab')) tab.hidden = tab.id !== `tab-${name}`;
 }
 
+// The needs in a street the topic bears on, in Gehl's quality criteria: the theme, with the criterion and why on hover.
+function needsLine(needs) {
+  if (!needs?.length) return null;
+  return el('p', { class: 'needs', title: 'Jan Gehl\'s 12 quality criteria for public space. A tag says which needs these records bear on, not a rating of the place.' },
+    el('span', { class: 'meta', text: 'Needs at stake: ' }),
+    ...needs.map((need) => el('span', { class: `need need-${need.theme.toLowerCase()}`, title: `${need.criterion}: ${need.why}`, text: `${need.theme} · ${need.why}` })));
+}
+
 function renderAnswer(data, waiting) {
   const tab = $('tab-answer');
   const { result, explanation } = data;
   tab.replaceChildren(
     el('h3', { class: 'question', text: result.question }),
-    el('p', { class: 'meta', text: `About ${result.question_moment} New York time · ${result.topic_label || result.topic} · records within ${result.radius_m} m of the pin` }));
+    el('p', { class: 'meta', text: `About ${result.question_moment} New York time · ${result.topic_label || result.topic} · records within ${result.radius_m} m of the pin` }),
+    needsLine(result.needs));
   if (!explanation) {
     tab.append(el('p', { class: 'waiting', text: waiting ? 'Muse Spark is reading the evidence and writing the answer…' : 'This run has no explanation yet.' }));
     return;
@@ -796,6 +805,11 @@ async function showOverview() {
     stat(summary.sites_records_and_photo_disagree ?? '-', 'where the records and the photo disagree'),
     stat(share, `of ${summary.claims_kept + summary.claims_removed} claims kept after checking`),
     stat(summary.lookups.check_photo || 0, 'times Muse Spark asked SAM 3.1 to look again'));
+  const needs = Object.entries(summary.needs || {}).filter(([, count]) => count.sites);
+  $('overview-needs').replaceChildren(...(needs.length ? [
+    el('span', { class: 'meta', text: 'Needs at stake (Gehl\'s quality criteria): ' }),
+    ...needs.map(([theme, count]) => el('span', { class: `need need-${theme.toLowerCase()}`, text: `${theme}: ${count.sites} places, ${count.disagree} where records and photo disagree` })),
+  ] : []));
   const order = Object.keys(WORST);
   const ranked = [...sites.features].sort((a, b) => order.indexOf(a.properties.worst) - order.indexOf(b.properties.worst));
   $('overview-list').replaceChildren(...ranked.map((feature) => {
@@ -804,7 +818,7 @@ async function showOverview() {
       state.map?.flyTo({ center: feature.geometry.coordinates, zoom: 16 });
       if (state.map) sitePopup(feature);
     } }, el('span', { class: 'swatch', style: `background:${(WORST[site.worst] || WORST.none).color}` }),
-    el('span', {}, el('strong', { text: site.place }), ` · ${site.label}`, site.flags.length ? el('br') : null,
+    el('span', {}, el('strong', { text: site.place }), ` · ${site.label}`, site.needs?.length ? ` · ${site.needs.join(', ')}` : '', site.flags.length ? el('br') : null,
       site.flags.length ? el('span', { class: 'meta', text: site.flags.map(words).join(', ') }) : null)));
   }));
   $('overview-card').hidden = false;

@@ -79,6 +79,7 @@ def test_photo_to_answer_streams_every_step(client):
     assert [item["name"] for item in client.get("/api/runs").json()] == [run]
     data = client.get(f"/api/runs/{run}").json()
     assert data["explanation"]["claims"][0]["evidence_ids"] == ["photo:scaffolding"]
+    assert data["result"]["needs"] == [{"theme": "Comfort", "criterion": "Opportunities to walk", "why": "sheds, scaffolding and fences narrow the sidewalk"}]
     assert {"permit", "complaint", "lot"} <= {f["properties"]["group"] for f in data["map"]["records"]["features"]}
     assert data["map"]["pin"]["radius_m"] == 50 and data["map"]["flood"]["features"] == []
     assert client.get(f"/api/runs/{run}/files/overlay.png").headers["content-type"] == "image/png"
@@ -169,9 +170,14 @@ def test_district_overview_shows_the_last_batch(client, tmp_path, monkeypatch):
     (tmp_path / "derived").mkdir()
     (tmp_path / "derived" / "batch.json").write_text(json.dumps({"summary": {"sites": 2}, "sites": [site, gone]}))
     data = client.get("/api/batch").json()
-    assert data["summary"] == {"sites": 2}
+    assert data["summary"]["sites"] == 2
+    # a tree site bears on Protection (falling limbs) and Enjoyment (shade, greenery); it agrees, so none disagree
+    assert data["summary"]["needs"] == {
+        "Protection": {"sites": 1, "disagree": 0}, "Comfort": {"sites": 0, "disagree": 0}, "Enjoyment": {"sites": 1, "disagree": 0},
+    }
     [point] = data["sites"]["features"]
     assert point["properties"]["worst"] == "agreement" and point["properties"]["run"] == run.name
+    assert point["properties"]["needs"] == ["Protection", "Enjoyment"]
     assert point["properties"]["label"] == "Street trees" and point["geometry"]["coordinates"] == [SHED[1], SHED[0]]
 
 

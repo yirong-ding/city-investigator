@@ -23,7 +23,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from city_investigator import times
+from city_investigator import needs, times
 from city_investigator.meta import PROVIDERS, SpendCapError
 from city_investigator.photo_input import from_mapillary
 from city_investigator.settings import DERIVED_DIR, load_env
@@ -142,6 +142,7 @@ def geojson(entries: list[dict[str, Any]]) -> dict[str, Any]:
                 "properties": {
                     "topic": entry["topic"],
                     "label": TOPICS[entry["topic"]].label,
+                    "needs": needs.themes(entry["topic"]),
                     "place": entry["place"],
                     "worst": worst(entry),
                     "flags": [flag["type"] for flag in entry["flags"]],

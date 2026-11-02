@@ -235,3 +235,10 @@ a { color: var(--accent); }
   .panel { border-right: 0; overflow: visible; }
   .stage { grid-template-rows: 60vh 220px; order: -1; }
 }
+
+/* Needs at stake: Gehl's quality criteria themes */
+.needs { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 6px 0; }
+.need { font-size: 12px; padding: 2px 8px; border-radius: 10px; border: 1px solid; }
+.need-protection { color: #8a1c1c; border-color: #d99a9a; background: #fbeeee; }
+.need-comfort { color: #1d4f8a; border-color: #9bb8d9; background: #eef3fb; }
+.need-enjoyment { color: #2b6a2f; border-color: #a3cfa6; background: #eef8ef; }

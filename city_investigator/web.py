@@ -30,7 +30,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from city_investigator import batch
+from city_investigator import batch, needs
 from city_investigator.explain import explain_run
 from city_investigator.geo import distance_m
 from city_investigator.investigate import OUTPUT, USER_UNCERTAINTY_M, investigate_photo, parse_local
@@ -383,7 +383,9 @@ def create_app(state: State | None = None) -> FastAPI:
             raise HTTPException(404, "No batch run yet: python -m city_investigator.batch")
         saved = json.loads(path.read_text())
         sites = [site for site in saved["sites"] if "error" not in site and (OUTPUT / site["run"] / "result.json").is_file()]
-        return {"summary": saved["summary"], "sites": batch.geojson(sites)}
+        points = batch.geojson(sites)
+        summary = saved["summary"] | {"needs": needs.district([feature["properties"] for feature in points["features"]])}
+        return {"summary": summary, "sites": points}
 
     @app.get("/api/runs")
     def runs() -> list[dict[str, Any]]:
@@ -409,6 +411,7 @@ def create_app(state: State | None = None) -> FastAPI:
         for record in [*result["records"], *((explanation or {}).get("evidence") or {}).values()]:
             record["group"] = group(record)
         result.setdefault("topic_label", TOPICS[result["topic"]].label if result["topic"] in TOPICS else result["topic"])
+        result["needs"] = needs.for_topic(result["topic"])  # Gehl's quality criteria the topic bears on
         return {"name": name, "result": result, "explanation": explanation, "map": map_layers(result, explanation, state.store)}
 
     @app.get("/api/runs/{name}/scene3d.json")

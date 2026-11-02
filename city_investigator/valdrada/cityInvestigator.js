@@ -373,7 +373,9 @@ function label(lines, color, x, y, z) {
   rest.forEach((line, i) => g.fillText(line, 44, 150 + 64 * i));
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
-  const sprite = own(new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, toneMapped: false })));
+  // fog off: Valdrada's fog chunks (world/materials.js) read a mesh's `transformed`, which a sprite's shader lacks, so a
+  // fogged sprite fails to compile and is never drawn
+  const sprite = own(new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, toneMapped: false, fog: false })));
   sprite.scale.set(6.4, (6.4 * canvas.height) / canvas.width, 1);
   sprite.position.set(x, y + sprite.scale.y / 2, z);   // its foot at y
   return sprite;
@@ -463,10 +465,13 @@ function pinFor(streamer, item, place) {
     color: item.color, transparent: true, opacity: 0.75, toneMapped: false,
   })));
   ring.position.set(x, y + 0.02, z);
-  const post = own(new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 2.4, 8), new THREE.MeshBasicMaterial({ color: item.color, toneMapped: false })));
-  post.position.set(x, y + 1.2, z);
+  const paint = new THREE.MeshBasicMaterial({ color: item.color, toneMapped: false });
+  const post = own(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 2.3, 8), paint));
+  post.position.set(x, y + 1.15, z);
+  const head = own(new THREE.Mesh(new THREE.IcosahedronGeometry(0.16, 1), paint));   // seen where flood water covers the ring
+  head.position.set(x, y + 2.3, z);
   const group = new THREE.Group();
-  group.add(ring, post, place([item.title, item.text], item.color, [x, z], 2.5));
+  group.add(ring, post, head, place([item.title, item.text], item.color, [x, z], 2.5));
   return group;
 }
 
@@ -486,12 +491,19 @@ function rainGarden() {
   bed.position.y = 0.03;
   group.add(bed);
   const greens = [0x4f7a32, 0x5d8a3a, 0x3f6b2a, 0x6b8f3e].map((color) => new THREE.MeshStandardMaterial({ color, roughness: 0.85 }));
-  for (let i = 0; i < 16; i++) {   // grasses and shrubs, spread along the bed
-    const r = 0.18 + 0.12 * Math.abs(Math.sin(i * 7.31));
+  for (let i = 0; i < 18; i++) {   // tall grasses and perennials, spread along the bed (0.8 to 1.3 m)
+    const r = 0.2 + 0.1 * Math.abs(Math.sin(i * 7.31));
     const plant = own(new THREE.Mesh(new THREE.IcosahedronGeometry(r, 0), greens[i % greens.length]));
-    plant.scale.y = 1.4;
-    plant.position.set(((i + 0.5) / 16 - 0.5) * (length - 0.6), r * 1.1, Math.sin(i * 3.7) * (width / 2 - 0.4));
+    plant.scale.y = 2.2;
+    plant.position.set(((i + 0.5) / 18 - 0.5) * (length - 0.6), r * 2, Math.sin(i * 3.7) * (width / 2 - 0.4));
     group.add(plant);
+  }
+  // the bed's outline at 0.75 m, in the proposals' green: it stands over recorded flood water, which covers the rim
+  const outline = new THREE.MeshBasicMaterial({ color: COLORS.proposal, transparent: true, opacity: 0.85, toneMapped: false });
+  for (const [w, d, x, z] of [[length, 0.06, 0, width / 2], [length, 0.06, 0, -width / 2], [0.06, width, length / 2, 0], [0.06, width, -length / 2, 0]]) {
+    const edge = own(new THREE.Mesh(new THREE.BoxGeometry(w, 0.06, d), outline));
+    edge.position.set(x, 0.75, z);
+    group.add(edge);
   }
   return group;
 }

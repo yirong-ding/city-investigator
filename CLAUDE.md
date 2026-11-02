@@ -58,8 +58,9 @@ python -m city_investigator.web                            # the page, http://12
 
 ## Where things stand (Nov 2)
 
-Done and pushed: everything above. Tested offline and in Node with stand-ins; seen in the owner's Valdrada so far:
-the flood water (looks right). Not yet seen there: sheds, façades, pins and the After view.
+Done and pushed: everything above. Tested offline and in Node with stand-ins. Seen in the owner's Valdrada: the
+flood water, permitted sheds and the red façade wash (look right). Labels were out of frame and After duplicated a
+standing shed (fixed Nov 2, not yet seen again); record pins and rain gardens not yet seen there.
 
 Next, in order:
 1. Check the 3D layers in the owner's Valdrada (`scene3d` list, then screenshots of Before and After); fix what

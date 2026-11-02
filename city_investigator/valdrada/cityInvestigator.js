@@ -38,7 +38,7 @@ const WALL_MIN = 2;    // meters: shorter walls get no shed
 const COLORS = { record: '#f2a900', photo: '#3d8bfd', unsafe: '#d92b2b', proposal: '#2b7a3d' };
 const GARDEN = [6, 1.5];   // meters along and across the curb: a curbside rain garden's size
 const GARDENS = 3;     // rain gardens shown around a low spot
-const LABEL_Y = 5.6;   // meters over the sidewalk: a label clears a shed's parapet
+const LABEL_Y = 3;     // meters over the street to a label's foot: in view of an eye-level camera, under no shed deck
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
@@ -375,9 +375,38 @@ function label(lines, color, x, y, z) {
   texture.colorSpace = THREE.SRGBColorSpace;
   const sprite = own(new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, toneMapped: false })));
   sprite.scale.set(6.4, (6.4 * canvas.height) / canvas.width, 1);
-  sprite.position.set(x, y + sprite.scale.y / 2 - 0.6, z);
+  sprite.position.set(x, y + sprite.scale.y / 2, z);   // its foot at y
   return sprite;
 }
+
+// Labels for one scene: each over a walking or road surface, its foot `rise` meters up. Labels at one spot along a
+// wall (`along`, its direction) spread along it, middle first, then either side, all at one height in view; other
+// labels at one spot stack upward.
+function labeler(streamer) {
+  const count = new Map(), stacked = new Map();
+  return (lines, color, at, rise = LABEL_Y, along = null) => {
+    let [x, z] = onFoot(streamer, ...at);
+    const key = `${Math.round(x / 3)},${Math.round(z / 3)}`;
+    const n = count.get(key) ?? 0;
+    count.set(key, n + 1);
+    let below = 0;
+    if (along) {
+      const step = (n % 2 ? 1 : -1) * Math.ceil(n / 2) * 6.8;   // 0, +6.8, -6.8, +13.6, ...: a label's width apart
+      [x, z] = [x + along[0] * step, z + along[1] * step];
+    } else {
+      below = stacked.get(key) ?? 0;
+    }
+    const sprite = label(lines, color, x, surfaceY(streamer, x, z) + rise + below, z);
+    if (!along) stacked.set(key, below + sprite.scale.y + 0.2);
+    return sprite;
+  };
+}
+
+// Where a wall's label stands: over the roadway just past the curb side of a shed along the wall.
+const pastCurb = (w) => [0, 1].map((i) => w.mid[i] + w.n[i] * ((w.depth ?? SHED_DEPTH) + 1));
+const alongWall = (w) => [w.n[1], -w.n[0]];
+// A wall along which a permitted shed is drawn already.
+const shedded = (permitted, w) => permitted.some((r) => toSegment(w.mid, r.a, r.b) < 1 && r.n[0] * w.n[0] + r.n[1] * w.n[1] > 0.9);
 
 // Valdrada's shed along a wall, as deep as the sidewalk, over a strip of the source's color.
 function shedAlong(props, streamer, w, color) {
@@ -427,7 +456,7 @@ function onFoot(streamer, x, z) {
 }
 
 // A record's pin: a ring on the ground in its kind's color, a post, and its label; labels at one spot stack upward.
-function pinFor(streamer, item, stacked) {
+function pinFor(streamer, item, place) {
   const [x, z] = onFoot(streamer, ...project(...item.at));
   const y = surfaceY(streamer, x, z);
   const ring = own(new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 0.03, 32), new THREE.MeshBasicMaterial({
@@ -436,11 +465,8 @@ function pinFor(streamer, item, stacked) {
   ring.position.set(x, y + 0.02, z);
   const post = own(new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 2.4, 8), new THREE.MeshBasicMaterial({ color: item.color, toneMapped: false })));
   post.position.set(x, y + 1.2, z);
-  const key = `${Math.round(x / 3)},${Math.round(z / 3)}`;
-  const n = stacked.get(key) ?? 0;
-  stacked.set(key, n + 1);
   const group = new THREE.Group();
-  group.add(ring, post, label([item.title, item.text], item.color, x, y + 2.6 + 2.4 * n, z));
+  group.add(ring, post, place([item.title, item.text], item.color, [x, z], 2.5));
   return group;
 }
 
@@ -522,17 +548,12 @@ function gardenSpots(streamer, cx, cz) {
   return spots;
 }
 
-// The proposals, drawn as illustrations of each action done, each with a label of the proposal.
-async function afterGroup(streamer, items, props) {
+// The proposals, drawn as illustrations of each action done, each with a label of the proposal. Where the action's
+// picture is already there (the shed an unsafe façade must have, standing by permit), only the label is added.
+async function afterGroup(streamer, items, props, place, permitted) {
   const group = new THREE.Group();
   group.name = 'city-investigator-after';
-  const stacked = new Map();   // labels at one place stack upward
-  const note = (item, x, y, z) => {
-    const key = `${Math.round(x)},${Math.round(z)}`;
-    const n = stacked.get(key) ?? 0;
-    stacked.set(key, n + 1);
-    group.add(label(['Proposal (illustration)', item.text], COLORS.proposal, x, y + 2.4 * n, z));
-  };
+  const note = (item, at, rise, title = 'Proposal (illustration)', along = null) => group.add(place([title, item.text], COLORS.proposal, at, rise, along));
   for (const item of items) {
     const [x, z] = project(...item.at);
     await until(() => loaded(streamer, [x, z]), 30);
@@ -544,22 +565,21 @@ async function afterGroup(streamer, items, props) {
         garden.rotation.y = Math.atan2(spot.d[0], spot.d[1]);
         group.add(garden);
       }
-      const first = spots[0] ?? { x, z };
-      note(item, first.x, surfaceY(streamer, first.x, first.z) + 2.2, first.z);
+      note(item, spots.length ? [spots[0].x, spots[0].z] : [x, z], 1.2);
       if (!spots.length) console.warn('[city-investigator] no sidewalk along a curb near the low spot for rain gardens');
     } else if (item.draw === 'shed' && item.rings && props) {
       const walls = streetWalls(streamer, item.rings.map((ring) => ring.map(([lon, lat]) => project(lon, lat))));
-      for (const w of walls) group.add(shedAlong(props, streamer, w, COLORS.proposal).group);
+      const open = walls.filter((w) => !shedded(permitted, w));
+      for (const w of open) group.add(shedAlong(props, streamer, w, COLORS.proposal).group);
       const front = walls.sort((p, q) => q.length - p.length)[0];
-      const [lx, lz] = front ? [front.mid[0] + front.n[0] * 2, front.mid[1] + front.n[1] * 2] : [x, z];
-      note(item, lx, surfaceY(streamer, lx, lz) + LABEL_Y + 3.2, lz);
+      note(item, front ? pastCurb(front) : [x, z], LABEL_Y, walls.length && !open.length ? 'Proposal (shed in place)' : undefined, front && alongWall(front));
     } else if (item.draw === 'young_tree') {
       const tree = youngTree();
       tree.position.set(x, surfaceY(streamer, x, z), z);
       group.add(tree);
-      note(item, x, surfaceY(streamer, x, z) + 4.6, z);
+      note(item, [x, z], 4);
     } else {
-      note(item, x, surfaceY(streamer, x, z) + LABEL_Y, z);
+      note(item, [x, z]);
     }
   }
   console.log(`[city-investigator] after: ${items.length} proposal(s): ${items.map((item) => item.draw || 'label').join(', ')}`);
@@ -578,6 +598,7 @@ async function sceneGroup(streamer, url) {
   if (data.flood) group.add(await floodParts(data.flood, groundAt, cx, cz));
   const ringsOfItem = (item) => item.rings.map((ring) => ring.map(([lon, lat]) => project(lon, lat)));
   const props = (data.sheds?.length || data.seen?.length || data.after?.some((item) => item.draw === 'shed')) ? await streetPieces() : null;
+  const place = labeler(streamer);
   const permitted = [];   // the walls with a permitted shed drawn
   for (const item of data.sheds || []) {
     const rings = ringsOfItem(item);
@@ -587,10 +608,7 @@ async function sceneGroup(streamer, url) {
     for (const w of walls) group.add(shedAlong(props, streamer, w, COLORS.record).group);
     permitted.push(...walls);
     const front = walls.sort((p, q) => q.length - p.length)[0];
-    if (front) {
-      const [x, z] = [front.mid[0] + front.n[0] * 2, front.mid[1] + front.n[1] * 2];
-      group.add(label([item.label, item.address], COLORS.record, x, surfaceY(streamer, x, z) + LABEL_Y, z));
-    }
+    if (front) group.add(place([item.label, item.address], COLORS.record, pastCurb(front), LABEL_Y, alongWall(front)));
   }
   for (const item of data.seen || []) {
     const a = project(...item.a), b = project(...item.b), camera = project(...item.camera);
@@ -600,10 +618,8 @@ async function sceneGroup(streamer, url) {
     w.depth = sidewalkDepth(streamer, w) ?? SHED_DEPTH;
     const note = [item.label, `SAM 3.1, ${item.distance_m} m from the camera`];
     // where the photo's scaffolding stands in front of a permitted shed, the photo adds its label, not a second shed
-    const covered = permitted.some((r) => toSegment(w.mid, r.a, r.b) < 1 && r.n[0] * w.n[0] + r.n[1] * w.n[1] > 0.9);
-    const [x, z] = [w.mid[0] + w.n[0] * 2, w.mid[1] + w.n[1] * 2];
-    if (!covered) group.add(shedAlong(props, streamer, w, COLORS.photo).group);
-    group.add(label(note, COLORS.photo, x, surfaceY(streamer, x, z) + LABEL_Y + (covered ? 1.6 : 0), z));
+    if (!shedded(permitted, w)) group.add(shedAlong(props, streamer, w, COLORS.photo).group);
+    group.add(place(note, COLORS.photo, pastCurb(w), LABEL_Y, alongWall(w)));
   }
   for (const item of data.facades || []) {
     const rings = ringsOfItem(item);
@@ -613,18 +629,14 @@ async function sceneGroup(streamer, url) {
     const height = item.height_m || 12;
     group.add(facadeWash(streamer, walls, height, COLORS.unsafe));
     const front = walls.sort((p, q) => q.length - p.length)[0];
-    if (front) {
-      const [x, z] = [front.mid[0] + front.n[0] * 1.5, front.mid[1] + front.n[1] * 1.5];
-      group.add(label([item.label, item.address], COLORS.unsafe, x, surfaceY(streamer, x, z) + Math.min(height, 14) + 1, z));
-    }
+    if (front) group.add(place([item.label, item.address], COLORS.unsafe, pastCurb(front), LABEL_Y, alongWall(front)));
   }
-  const stacked = new Map();
   for (const item of data.markers || []) {
     await until(() => loaded(streamer, project(...item.at)), 30);
-    group.add(pinFor(streamer, item, stacked));
+    group.add(pinFor(streamer, item, place));
   }
   console.log(`[city-investigator] scene: ${data.markers?.length || 0} record pins, ${data.sheds?.length || 0} permitted sheds, ${data.seen?.length || 0} seen in the photo, ${data.facades?.length || 0} unsafe façades${data.flood ? ', flood' : ''}`);
-  group.add(await afterGroup(streamer, data.after || [], props));
+  group.add(await afterGroup(streamer, data.after || [], props, place, permitted));
   return group;
 }
 

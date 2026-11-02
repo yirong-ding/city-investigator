@@ -379,6 +379,8 @@ function label(lines, color, x, y, z) {
   g.fillStyle = color;
   g.fillRect(0, 0, 18, canvas.height);
   g.font = 'bold 58px Arial, Helvetica, sans-serif';
+  const room = canvas.width - 64, wide = g.measureText ? g.measureText(lines[0]).width : 0;
+  if (wide > room) g.font = `bold ${Math.floor((58 * room) / wide)}px Arial, Helvetica, sans-serif`;   // a long title shrinks to fit
   g.fillText(lines[0], 44, 78);
   g.fillStyle = '#ffffff';
   g.font = '44px Arial, Helvetica, sans-serif';
@@ -557,12 +559,12 @@ function besideLots(streamer, x, z, d) {
   return true;
 }
 
-// Where rain gardens could go around a low spot: sidewalk along a curb, on ground higher than the spot (water runs
-// down to it) where there is any, nearer first, at least 15 m apart; each set back 0.3 m from the curb.
+// Where rain gardens could go around a low spot: sidewalk along a curb within 56 m, on ground higher than the spot
+// (water runs down to it) where there is any, nearer first, at least 12 m apart; each set back 0.3 m from the curb.
 function gardenSpots(streamer, cx, cz) {
   const base = streamer.terrainAt(cx, cz) ?? 0;
   const candidates = [], rejected = { notSidewalk: 0, noCurb: 0, median: 0, corners: 0 };
-  for (const r of [10, 16, 22, 28, 34, 40]) {
+  for (const r of [10, 16, 22, 28, 34, 40, 48, 56]) {
     for (let a = 0; a < 360; a += 10) {
       const x = cx + r * Math.sin((a * Math.PI) / 180), z = cz + r * Math.cos((a * Math.PI) / 180);
       if (!WALK.has(streamer.surfaceInfoAt(x, z)?.kind)) { rejected.notSidewalk++; continue; }
@@ -581,7 +583,7 @@ function gardenSpots(streamer, cx, cz) {
   }
   candidates.sort((p, q) => q.higher - p.higher || p.r - q.r);
   const spots = [];
-  for (const c of candidates) if (spots.length < GARDENS && spots.every((s) => Math.hypot(s.x - c.x, s.z - c.z) > 15)) spots.push(c);
+  for (const c of candidates) if (spots.length < GARDENS && spots.every((s) => Math.hypot(s.x - c.x, s.z - c.z) > 12)) spots.push(c);
   console.log(`[city-investigator] rain gardens: ${candidates.length} possible spots, ${spots.length} placed; passed over: ${Object.entries(rejected).map(([why, n]) => `${why} ${n}`).join(', ')}`);
   return spots;
 }
@@ -606,7 +608,8 @@ async function afterGroup(streamer, items, props, place, permitted, floodM3) {
       note(item, spots.length ? [spots[0].x, spots[0].z] : [x, z], 1.2);
       if (spots.length && floodM3) {   // the scale of it: what the gardens hold against the water the model has here
         const held = spots.length * GARDEN_M3;
-        group.add(place(['Rain gardens and the modeled flood', `${spots.length} rain gardens like DEP's hold about ${Math.round(held)} m³ a storm; `
+        const gardens = spots.length === 1 ? "1 rain garden like DEP's holds" : `${spots.length} rain gardens like DEP's hold`;
+        group.add(place(['Rain gardens and the modeled flood', `${gardens} about ${Math.round(held)} m³ a storm; `
           + `the modeled flood within ${NEAR_M} m holds about ${Math.round(floodM3).toLocaleString('en-US')} m³ (${(100 * held / floodM3).toFixed(1)}%).`],
         COLORS.proposal, [spots[0].x, spots[0].z], 1.2));
       }

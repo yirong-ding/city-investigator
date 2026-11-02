@@ -263,25 +263,37 @@ def scene(
     }
 
 
-def main() -> None:
-    """The investigations with something for Valdrada to draw, most first, with a link that opens each."""
+def main(argv: list[str] | None = None) -> None:
+    """The investigations with something for Valdrada to draw, most first, with a link that opens each: the newest
+    run of each photo and topic, unless --all."""
+    import argparse
+
     from city_investigator.investigate import OUTPUT
     from city_investigator.store import Store
+    from city_investigator.web import group
 
+    parser = argparse.ArgumentParser(description="Investigations with something to draw in Valdrada")
+    parser.add_argument("--all", action="store_true", help="every run, not only the newest of each photo and topic")
+    every = parser.parse_args(argv).all
+    runs: dict[Any, tuple[Any, dict[str, Any]]] = {}
+    for path in sorted(OUTPUT.glob("*/result.json")):  # folder names start with the time: a later run replaces
+        result = json.loads(path.read_text())
+        runs[path if every else (result["photo"].get("ref"), result["topic"])] = (path, result)
     store = Store.load()
     rows = []
-    for path in OUTPUT.glob("*/result.json"):
-        result = json.loads(path.read_text())
-        drawn = scene(result, store.buildings, None)
-        counts = (len(drawn["sheds"]), len(drawn["seen"]), len(drawn["facades"]), result["topic"] == "flooding")
-        boxes = any("boxes" in item for item in result.get("observations", []))
+    for path, result in runs.values():
+        explained = path.parent / "explanation.json"
+        drawn = scene(result, store.buildings, None, json.loads(explained.read_text()) if explained.is_file() else None, group)
+        placed = "fov_deg" in result["photo"]  # runs from before Nov 1 kept no SAM boxes to place the photo's objects
+        counts = [len(drawn[kind]) for kind in ("markers", "sheds", "seen", "facades", "after")]
         where = next((item["address"] for kind in ("sheds", "facades") for item in drawn[kind] if item.get("address")), "")
-        rows.append((counts, path.parent.name, result.get("topic_label") or result["topic"], where, boxes))
-    rows.sort(key=lambda row: (-sum(row[0][:3]), -row[0][3], row[1]))
-    for (sheds, seen, facades, flood), name, topic, where, boxes in rows:
-        parts = [f"{sheds} permitted shed(s)", f"{seen} seen in the photo" if boxes else "photo: run again to place it",
-                 f"{facades} unsafe façade(s)"] + (["flood water"] if flood else [])
-        print(f"{topic}{f' at {where}' if where else ''}: {', '.join(parts)}\n    http://127.0.0.1:8000/#run={name}")
+        rows.append((sum(counts) + (result["topic"] == "flooding"), path.parent.name, result, counts, placed, where))
+    rows.sort(key=lambda row: (-row[0], row[1]))
+    for _, name, result, (pins, sheds, seen, facades, after), placed, where in rows:
+        parts = [f"{pins} record pin(s)", f"{sheds} permitted shed(s)", f"{seen} seen in the photo" if placed else "photo: run again to place it",
+                 f"{facades} unsafe façade(s)"] + (["flood water"] if result["topic"] == "flooding" else []) + [f"{after} proposal(s) for After"]
+        label = result.get("topic_label") or result["topic"]
+        print(f"{label}{f' at {where}' if where else ''}: {', '.join(parts)}\n    http://127.0.0.1:8000/#run={name}")
     if not rows:
         print(f"No investigations in {OUTPUT}.")
 

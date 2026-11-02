@@ -39,7 +39,7 @@ python -m smoke.check_env                                  # keys, services, mod
 python -m city_investigator.snapshot                       # download the district's records (--only NAME)
 python -m city_investigator.shortlist --topic trees        # sites worth investigating, with photos
 python -m city_investigator.batch --limit 3 --again        # investigate 3 sites PER TOPIC (about 26), again
-python -m city_investigator.scene3d                        # which runs have something to draw in Valdrada
+python -m city_investigator.scene3d                        # newest run per site and what it draws in Valdrada (--all)
 python -m city_investigator.valdrada_addon G:\Projects\valdrada   # install or update the Valdrada add-on
 python -m city_investigator.web                            # the page, http://127.0.0.1:8000
 ```

@@ -6,6 +6,7 @@ defensively because the city renames and re-encodes fields over time.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
@@ -114,6 +115,17 @@ def classify_complaint(complaint_type: Any, descriptor: Any) -> tuple[str, str] 
     return COMPLAINTS.get((ctype, desc)) or COMPLAINTS.get((ctype, None))
 
 
+def outcome_text(text: Any, limit: int = 150) -> str | None:
+    """An agency's resolution of a 311 complaint, its first sentence, cut at a word to at most `limit` characters."""
+    words = " ".join(str(text or "").split())
+    if not words:
+        return None
+    first = re.split(r"(?<=[.!?])\s", words, maxsplit=1)[0]
+    if len(first) <= limit:
+        return first
+    return first[:limit].rsplit(" ", 1)[0].rstrip(",;:") + "…"
+
+
 def day(value: datetime | None) -> str:
     return times.to_local(value).strftime("%Y-%m-%d") if value else "unknown date"
 
@@ -128,6 +140,7 @@ def from_311(row: dict[str, Any], dataset: str) -> Evidence | None:
     created = times.parse(row.get("created_date"))
     closed = times.parse(row.get("closed_date"))
     status = f"closed {day(closed)}" if closed else str(row.get("status") or "status unknown").lower()
+    outcome = outcome_text(row.get("resolution_description"))
     address = join_address(row.get("incident_address")) or join_address(
         row.get("intersection_street_1"), "and", row.get("intersection_street_2")
     )
@@ -140,7 +153,7 @@ def from_311(row: dict[str, Any], dataset: str) -> Evidence | None:
         dataset=dataset,
         summary=(
             f"311 complaint on {day(created)}: {row.get('complaint_type')} / {row.get('descriptor')}"
-            f" ({status})"
+            f" ({status})" + (f"; outcome: {outcome}" if outcome else "")
         ),
         lat=lat,
         lon=lon,

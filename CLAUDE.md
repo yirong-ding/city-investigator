@@ -51,6 +51,7 @@ python -m city_investigator.web                            # the page, http://12
 - `topics.py`, `checks.py`, `sheds.py`, `floodmap.py`, `buildings.py`: topics and the checks that raise flags.
 - `photo_input.py`, `segment.py`, `meta.py`: photos, SAM 3.1, model clients and spend caps.
 - `investigate.py`, `explain.py`, `actions.py`: a run, Muse Spark's checked claims, and the vetted proposals.
+- `precedents.py`: how 311 reports like a site's ended across the district (share closed, days, outcomes).
 - `needs.py`: Gehl's 12 quality criteria each topic bears on.
 - `scene3d.py`, `valdrada/cityInvestigator.js`, `valdrada_addon.py`: the 3D scene and the Valdrada add-on
   (flood water, permitted sheds, scaffolding seen in the photo, unsafe façades, record pins, After view).

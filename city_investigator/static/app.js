@@ -444,6 +444,7 @@ function shortName(id, item) {
     floodnet: `sensor ${item?.date ? item.date.slice(5) : 'event'}`,
     stormwater: 'city flood model',
     recurrence: `history: ${rest.replaceAll('_', ' ')}`,
+    precedent: `how such reports ended: ${rest.replaceAll('_', ' ')}`,
     coverage: `coverage: ${rest.split('@')[0].replaceAll('_', ' ')}`,
     flag: `flag: ${rest.replaceAll('_', ' ')}`,
     rain: 'rain',

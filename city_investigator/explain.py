@@ -32,7 +32,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from city_investigator import times
+from city_investigator import precedents, times
 from city_investigator.actions import action_items
 from city_investigator.config import DROPPED_FIELDS, RAIN_STATION
 from city_investigator.evidence import Evidence
@@ -63,13 +63,14 @@ LABELS = {
 # Each label must cite at least one piece of evidence of these types.
 NEEDS = {
     "observation": {"photo"},
-    "record": {"record", "coverage"},
+    "record": {"record", "coverage", "precedent"},
     "model": {"model"},
-    "hypothesis": {"photo", "record", "model", "coverage", "flag"},
+    "hypothesis": {"photo", "record", "model", "coverage", "flag", "precedent"},
     "no_coverage": {"coverage"},
     "proposal": {"action"},
 }
 FINDINGS = {"photo", "record", "model", "coverage", "flag"}  # what a proposal must also cite: what it answers
+# (a precedent, how reports like these ended across the district, may back a proposal but is not about this place)
 MAX_PROPOSALS = 3
 # A proposal may say what could help; it may not promise a result.
 PROMISE = r"\b(will|would|guarantees?|ensures?)\s+(definitely\s+)?(fix|solve|stop|prevent|end|eliminate|resolve|guarantee)\b"
@@ -99,7 +100,7 @@ photo with the records.
 Answer in short claims, one fact or inference each, in plain words a neighbor would use. Label each claim:
 - observation: what the photo shows. Cite only photo ids. You may read signs, building numbers and \
 storefront names yourself and cite "photo".
-- record: what a record, a count of records or a coverage note states. Cite those ids, never photo ids.
+- record: what a record, a count of records, a precedent or a coverage note states. Cite those ids, never photo ids.
 - model: what a model estimate states. Cite model ids.
 - hypothesis: an inference that connects or explains evidence. Say "may" or "likely". Cite every id it rests on.
 - no_coverage: what the data cannot tell here, because a source does not cover this place or time or \
@@ -117,6 +118,10 @@ to pond in a design storm, not what happened on any day.
 - If the photo was taken at a different time than the question asks about, it shows the place, not that moment.
 - Say nothing about who owns or runs a building, and do not assign blame. Do not describe people in the photo.
 - Use the local dates given. Write 6 to 12 claims, then up to 3 proposals.
+- Precedent items say how 311 reports with the same wording ended across the district: the share closed, how \
+fast, and the outcomes the agencies recorded most often. Use them to say what a report like this one usually led \
+to, and to back a proposal with it; a precedent is about the district, so a proposal still cites the evidence \
+about this place it answers. A closed report is what the agency recorded, not that the problem is gone.
 - Proposals come last. Fit each to what the evidence shows was already tried: when the same problem was \
 reported and closed again and again, another identical report is less useful than raising it with the \
 community board. Say what a step could do ("could ask", "could help"), never that it will fix the problem. \
@@ -357,6 +362,9 @@ def evidence_list(result: dict[str, Any]) -> dict[str, dict[str, Any]]:
         add(not_seen_item(concept))
     for record in result["records"][:MAX_RECORDS]:
         add(evidence_item(record))
+    filed_here = {record.get("category") for record in result["records"] if record["id"].startswith("311:")}
+    for precedent in precedents.for_site(result["topic"], filed_here):
+        add(precedent.item())
     for chain in result.get("shed_chains", []):
         add({
             "id": f"shed_history:{chain['bin'] or slug(chain['address'] or 'building')}",

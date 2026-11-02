@@ -21,7 +21,7 @@ import math
 from datetime import datetime, timezone
 from typing import Any, Callable
 
-from city_investigator.actions import ACTIONS
+from city_investigator.actions import ACTIONS, IDEAS
 from city_investigator.buildings import Building, Buildings
 from city_investigator.geo import distance_m
 
@@ -222,20 +222,24 @@ def after_view(result: dict[str, Any], explanation: dict[str, Any] | None, build
     by_id = {item["id"]: item for item in [*result["records"], *(explanation.get("evidence") or {}).values()]}
     flags = {f"flag:{flag['type']}": flag for flag in result.get("flags", [])}
     actions = {f"action:{action.key}": action for listed in ACTIONS.values() for action in listed}
+    ideas = {f"idea:{idea.key}": idea for listed in IDEAS.values() for idea in listed}
     location = result["photo"]["location"]
     items = []
     for claim in explanation.get("claims", []):
         cited = claim.get("evidence_ids", [])
         action = next((actions[eid] for eid in cited if eid in actions), None)
-        if claim.get("kind") != "proposal" or action is None:
+        idea = next((ideas[eid] for eid in cited if eid in ideas), None)
+        if claim.get("kind") != "proposal" or (action or idea) is None:
             continue
+        action = action or idea  # an idea from elsewhere is drawn as a label
         records = [by_id[eid] for eid in cited if eid in by_id]
         records += [by_id[rid] for eid in cited if eid in flags for rid in flags[eid].get("evidence_ids", []) if rid in by_id]
         located = [item for item in records if item.get("lat") is not None and item.get("lon") is not None]
         if action.after == "young_tree":  # the tree itself, from the inventory, before an address's lot
             located.sort(key=lambda item: item.get("category") != "tree_inventory")
         at = located[0] if located and action.after != "rain_gardens" else location  # rain gardens: around the low spot
-        item = {"action": action.key, "draw": action.after, "text": claim["text"], "at": [at["lon"], at["lat"]]}
+        item = {"action": action.key, "draw": action.after, "text": claim["text"], "at": [at["lon"], at["lat"]],
+                "idea": action is idea}
         if action.after == "shed":
             building = next((found for record in records if (found := buildings.find(
                 record.get("bin"), record.get("bbl"), record.get("lat"), record.get("lon")))), None)

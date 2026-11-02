@@ -445,6 +445,7 @@ function shortName(id, item) {
     stormwater: 'city flood model',
     recurrence: `history: ${rest.replaceAll('_', ' ')}`,
     precedent: `how such reports ended: ${rest.replaceAll('_', ' ')}`,
+    idea: `idea: ${rest.replaceAll('_', ' ')}`,
     coverage: `coverage: ${rest.split('@')[0].replaceAll('_', ' ')}`,
     flag: `flag: ${rest.replaceAll('_', ' ')}`,
     rain: 'rain',
@@ -509,8 +510,9 @@ function renderAnswer(data, waiting) {
       for (const id of claim.evidence_ids) {
         cites.append(el('button', { type: 'button', class: 'chip', title: evidence.get(id)?.summary || id, text: shortName(id, evidence.get(id)), onclick: () => focusEvidence(id) }));
       }
-      const item = el('li', { class: `claim kind-${claim.kind}`, tabindex: '0' },
-        el('span', { class: 'kind', text: KINDS[claim.kind] || claim.kind }), el('p', { text: claim.text }), cites);
+      const idea = claim.kind === 'proposal' && claim.evidence_ids.some((id) => id.startsWith('idea:'));
+      const item = el('li', { class: `claim kind-${claim.kind}${idea ? ' idea' : ''}`, tabindex: '0' },
+        el('span', { class: 'kind', text: idea ? 'IDEA FROM ELSEWHERE · NOT OFFERED HERE YET' : (KINDS[claim.kind] || claim.kind) }), el('p', { text: claim.text }), cites);
       hoverable(item, claim.evidence_ids);
       list.append(item);
     }

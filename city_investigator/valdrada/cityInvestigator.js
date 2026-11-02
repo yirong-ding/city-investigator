@@ -626,7 +626,7 @@ async function afterGroup(streamer, items, props, place, permitted, floodM3) {
       group.add(tree);
       note(item, [x, z], 4);
     } else {
-      note(item, [x, z]);
+      note(item, [x, z], LABEL_Y, item.idea ? 'Idea from elsewhere (not offered here yet)' : undefined);
     }
   }
   console.log(`[city-investigator] after: ${items.length} proposal(s): ${items.map((item) => item.draw || 'label').join(', ')}`);

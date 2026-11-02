@@ -122,6 +122,18 @@ def test_proposals_name_a_real_channel_answer_the_evidence_and_promise_nothing(s
     assert "## What could be done" in text and text.count("**PROPOSAL**") == 3
 
 
+def test_one_proposal_may_draw_on_an_idea_tried_elsewhere(sidewalk_result):
+    known = ex.evidence_list(sidewalk_result)
+    permit = next(eid for eid, item in known.items() if item.get("summary", "").startswith("DOB permit"))
+    netting = known["idea:facade_netting"]
+    assert netting["type"] == "idea" and netting["summary"].startswith("Idea from elsewhere, not offered here yet") and netting["url"]
+    idea = ("New York City has piloted façade netting in place of a shed; it is not offered here yet.", "proposal", ["idea:facade_netting", permit])
+    assert ex.claim_problems(dict(zip(("text", "kind", "evidence_ids"), idea)), known) == []
+    assert "only a proposal" in ex.claim_problems({"text": "Netting exists.", "kind": "record", "evidence_ids": ["idea:facade_netting", permit]}, known)[0]
+    kept, dropped, _ = ex.check_claims(claims(idea, idea), known, [])
+    assert len(kept) == 1 and dropped[0]["problems"] == ["at most 1 proposal from an idea tried elsewhere"]
+
+
 def test_claims_are_read_through_code_fences():
     answer = "```json\n" + claims(("A.", "record", ["r1"])) + "\n```"
     assert ex.parse_claims(answer) == [{"text": "A.", "kind": "record", "evidence_ids": ["r1"]}]

@@ -2,6 +2,10 @@
 
 Muse Spark may propose next steps only from this list, and each proposal must also cite the
 evidence it answers, so a proposal never invents a program, a phone number or an outcome.
+
+IDEAS are practices tried elsewhere, each with its source, that are not offered here as a channel
+a resident can use. A proposal may draw on at most one, and the page labels it an idea from
+elsewhere, not offered here yet.
 The 311 entries use the complaint wording the city's own records for this district use
 (config.COMPLAINTS); the agency is the one those complaints go to.
 """
@@ -21,6 +25,7 @@ class Action:
     # How the 3D After view illustrates the action done (city_investigator.scene3d): curbside "rain_gardens", the
     # "shed" an unsafe façade must have, a "young_tree" replanted; None for a label only.
     after: str | None = None
+    source: str | None = None  # for an idea from elsewhere: where it is described
 
 
 def report(complaint_type: str, descriptor: str | None, agency: str, use: str, after: str | None = None) -> Action:
@@ -46,6 +51,13 @@ GREEN_INFRASTRUCTURE = Action(
     "and similar features that soak up stormwater before it reaches the sewers.",
     after="rain_gardens",
 )
+FLOODNET = Action(
+    "floodnet_sensor",
+    "FloodNet, the street flood sensor network run by NYU and CUNY with the city, takes residents' suggestions for "
+    "where to put a sensor (floodnet.nyc); placement weighs flood risk, social vulnerability and coverage, so a "
+    "suggestion is not a promise of a sensor.",
+    source="https://github.com/floodsense/floodsense_sensor",
+)
 GENERAL = "General Construction/Plumbing"
 
 ACTIONS: dict[str, tuple[Action, ...]] = {
@@ -55,6 +67,7 @@ ACTIONS: dict[str, tuple[Action, ...]] = {
         report("Sewer", "Street Flooding (SJ)", "the Department of Environmental Protection",
                "water standing in the street, best filed while it is happening"),
         GREEN_INFRASTRUCTURE,
+        FLOODNET,
         COMMUNITY_BOARD,
     ),
     "sidewalk": (
@@ -109,6 +122,36 @@ ACTIONS: dict[str, tuple[Action, ...]] = {
 }
 
 
+NETTING = Action(
+    "facade_netting",
+    "Idea from elsewhere, not offered here yet: New York City's 2023 \"Get Sheds Down\" plan promotes façade "
+    "safety netting in place of a sidewalk shed where netting keeps the public safe, piloted at the Queens County "
+    "courthouse, where a shed had stood for six years.",
+    source="https://www.citylandnyc.org/mayor-and-dob-announce-overhaul-of-sidewalk-construction-shed-rules/",
+)
+OPEN_SHEDS = Action(
+    "open_shed_designs",
+    "Idea from elsewhere, not offered here yet: lighter, more open sidewalk shed designs, such as Urban Umbrella, "
+    "first installed in New York City in 2018, block less light and sidewalk than standard sheds.",
+    source="https://therealdeal.com/new-york/2023/10/19/nyc-targets-sidewalk-sheds-but-experts-have-doubts",
+)
+IDEAS: dict[str, tuple[Action, ...]] = {
+    "flooding": (Action(
+        "cloudburst",
+        "Idea from elsewhere, not offered here yet: the NYC Department of Environmental Protection's cloudburst "
+        "program designs open spaces to hold and move water in extreme rain; its first pilot, finished in 2025 at "
+        "South Jamaica Houses in Queens, is a sunken basketball court that doubles as a basin in storms.",
+        source="https://www.nyc.gov/site/dep/environment/cloudburst.page",
+    ),),
+    "sidewalk": (NETTING, OPEN_SHEDS),
+    "facades": (NETTING,),
+}
+
+
 def action_items(topic: str) -> list[dict[str, str]]:
-    """The topic's actions as evidence items the explanation can cite."""
-    return [{"id": f"action:{action.key}", "type": "action", "summary": action.summary} for action in ACTIONS.get(topic, ())]
+    """The topic's actions and ideas from elsewhere as evidence items the explanation can cite."""
+    return [
+        {"id": f"action:{action.key}", "type": "action", "summary": action.summary} for action in ACTIONS.get(topic, ())
+    ] + [
+        {"id": f"idea:{idea.key}", "type": "idea", "summary": idea.summary, "url": idea.source or ""} for idea in IDEAS.get(topic, ())
+    ]

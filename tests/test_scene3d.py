@@ -144,6 +144,9 @@ def test_proposals_are_placed_at_what_they_cite_with_how_to_draw_them():
     assert gardens["draw"] == "rain_gardens" and gardens["at"] == [LON, LAT]  # around the low spot the photo shows
     assert board["draw"] is None and board["at"] == [complaint["lon"], complaint["lat"]] and board["text"] == "The board could raise it."
     assert scene(run(), buildings, None, None)["after"] == []
+    idea = {"evidence": {}, "claims": [{"kind": "proposal", "text": "Netting could replace the shed.", "evidence_ids": ["idea:facade_netting", "311:7"]}]}
+    [netting] = scene(run(records=[complaint]), buildings, None, idea)["after"]
+    assert netting["idea"] is True and netting["draw"] is None and netting["at"] == [complaint["lon"], complaint["lat"]]
 
 
 def test_pins_mark_the_cited_records_near_the_place_nearest_first():

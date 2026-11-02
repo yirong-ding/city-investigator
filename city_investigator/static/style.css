@@ -244,3 +244,4 @@ a { color: var(--accent); }
 .need-enjoyment { color: #2b6a2f; border-color: #a3cfa6; background: #eef8ef; }
 .valdrada-stale { position: absolute; top: 96px; left: 50%; transform: translateX(-50%); z-index: 4; margin: 0; max-width: 560px;
   padding: 8px 12px; background: #fff4e5; color: #6b3d00; border: 1px solid #f0b46a; border-radius: 6px; font-size: 13px; }
+.claim.idea { border-left-style: dashed; }

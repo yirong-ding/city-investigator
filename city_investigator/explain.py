@@ -67,11 +67,12 @@ NEEDS = {
     "model": {"model"},
     "hypothesis": {"photo", "record", "model", "coverage", "flag", "precedent"},
     "no_coverage": {"coverage"},
-    "proposal": {"action"},
+    "proposal": {"action", "idea"},
 }
 FINDINGS = {"photo", "record", "model", "coverage", "flag"}  # what a proposal must also cite: what it answers
 # (a precedent, how reports like these ended across the district, may back a proposal but is not about this place)
 MAX_PROPOSALS = 3
+MAX_IDEAS = 1  # proposals that draw on an idea from elsewhere
 # A proposal may say what could help; it may not promise a result.
 PROMISE = r"\b(will|would|guarantees?|ensures?)\s+(definitely\s+)?(fix|solve|stop|prevent|end|eliminate|resolve|guarantee)\b"
 MAX_TOOL_TURNS = 5
@@ -106,7 +107,9 @@ storefront names yourself and cite "photo".
 - no_coverage: what the data cannot tell here, because a source does not cover this place or time or \
 cannot see it. Cite the coverage id.
 - proposal: what the resident or the community board could do next. Cite exactly the action id of the \
-channel (only actions in the evidence list exist) and the evidence the step answers.
+channel (only actions in the evidence list exist) and the evidence the step answers. At most one proposal may \
+instead draw on an idea id: a practice tried elsewhere, not offered here; say where it was tried and that it is \
+not offered here yet, and cite the evidence it answers.
 
 Rules:
 - Cite only ids from the evidence list or from tool results. Never invent ids, dates, numbers or addresses.
@@ -634,8 +637,8 @@ def claim_problems(claim: Any, known: dict[str, dict[str, Any]]) -> list[str]:
         problems.append("an observation may cite only the photo; a claim that combines photo and records is a hypothesis")
     if kind == "record" and "photo" in types:
         problems.append("a record claim may not cite the photo; a claim that combines photo and records is a hypothesis")
-    if kind != "proposal" and "action" in types:
-        problems.append("only a proposal may cite an action")
+    if kind != "proposal" and types & {"action", "idea"}:
+        problems.append("only a proposal may cite an action or an idea")
     if kind == "proposal" and not types & FINDINGS:
         problems.append("a proposal must also cite the evidence it answers")
     if kind == "proposal" and re.search(PROMISE, claim["text"], re.IGNORECASE):
@@ -651,13 +654,16 @@ def check_claims(
     if claims is None:
         return [], [], [f"The answer was not a claims list; it starts {answer[:80]!r}."]
     kept, dropped = [], []
-    proposals = 0
+    proposals = ideas = 0
     for claim in claims:
         problems = claim_problems(claim, known)
         if not problems and claim.get("kind") == "proposal":
             proposals += 1
+            ideas += any(known[str(eid)]["type"] == "idea" for eid in claim["evidence_ids"])
             if proposals > MAX_PROPOSALS:
                 problems = [f"at most {MAX_PROPOSALS} proposals"]
+            elif ideas > MAX_IDEAS:
+                problems = [f"at most {MAX_IDEAS} proposal from an idea tried elsewhere"]
         if problems:
             dropped.append({"claim": claim, "problems": problems})
         else:

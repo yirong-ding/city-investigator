@@ -38,6 +38,10 @@ const WALL_MIN = 2;    // meters: shorter walls get no shed
 const COLORS = { record: '#f2a900', photo: '#3d8bfd', unsafe: '#d92b2b', proposal: '#2b7a3d' };
 const GARDEN = [6, 1.5];   // meters along and across the curb: a curbside rain garden's size
 const GARDENS = 3;     // rain gardens shown around a low spot
+// What one curbside rain garden or bioswale holds in a storm: NYC DEP designs them for about 1,100 to 3,000 gallons
+// each (1,870 at its Gowanus project); 2,000 gallons is 7.6 m³. Compared in After with the modeled flood near the spot.
+const GARDEN_M3 = 7.6;
+const NEAR_M = 150;    // the flood volume compared is the model's water within this distance of the spot
 const LABEL_Y = 3;     // meters over the street to a label's foot: in view of an eye-level camera, under no shed deck
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -292,7 +296,14 @@ async function floodParts(flood, groundAt, cx, cz) {
     mark.position.set(gx, ground + height, gz);
     group.add(pole, mark);
   }
-  console.log(`[city-investigator] flood: ${depths.size} m² of water${flood.gauge ? ', sensor marker' : ''}`);
+  // the water the model has standing near the spot, at its class depths (1 m² cells)
+  let near = 0;
+  for (const [key, depth] of depths) {
+    const [i, j] = key.split(',').map(Number);
+    if (Math.hypot((i + 0.5) * CELL - cx, (j + 0.5) * CELL - cz) <= NEAR_M) near += depth * CELL * CELL;
+  }
+  group.userData.nearM3 = near;
+  console.log(`[city-investigator] flood: ${depths.size} m² of water, about ${Math.round(near)} m³ within ${NEAR_M} m${flood.gauge ? ', sensor marker' : ''}`);
   return group;
 }
 
@@ -562,7 +573,7 @@ function gardenSpots(streamer, cx, cz) {
 
 // The proposals, drawn as illustrations of each action done, each with a label of the proposal. Where the action's
 // picture is already there (the shed an unsafe façade must have, standing by permit), only the label is added.
-async function afterGroup(streamer, items, props, place, permitted) {
+async function afterGroup(streamer, items, props, place, permitted, floodM3) {
   const group = new THREE.Group();
   group.name = 'city-investigator-after';
   const note = (item, at, rise, title = 'Proposal (illustration)', along = null) => group.add(place([title, item.text], COLORS.proposal, at, rise, along));
@@ -578,6 +589,12 @@ async function afterGroup(streamer, items, props, place, permitted) {
         group.add(garden);
       }
       note(item, spots.length ? [spots[0].x, spots[0].z] : [x, z], 1.2);
+      if (spots.length && floodM3) {   // the scale of it: what the gardens hold against the water the model has here
+        const held = spots.length * GARDEN_M3;
+        group.add(place(['Rain gardens and the modeled flood', `${spots.length} rain gardens like DEP's hold about ${Math.round(held)} m³ a storm; `
+          + `the modeled flood within ${NEAR_M} m holds about ${Math.round(floodM3).toLocaleString('en-US')} m³ (${(100 * held / floodM3).toFixed(1)}%).`],
+        COLORS.proposal, [spots[0].x, spots[0].z], 1.2));
+      }
       if (!spots.length) console.warn('[city-investigator] no sidewalk along a curb near the low spot for rain gardens');
     } else if (item.draw === 'shed' && item.rings && props) {
       const walls = streetWalls(streamer, item.rings.map((ring) => ring.map(([lon, lat]) => project(lon, lat))));
@@ -607,7 +624,8 @@ async function sceneGroup(streamer, url) {
   const groundAt = (x, z) => streamer.terrainAt(x, z) ?? base;
   const group = new THREE.Group();
   group.name = 'city-investigator';
-  if (data.flood) group.add(await floodParts(data.flood, groundAt, cx, cz));
+  const flood = data.flood ? await floodParts(data.flood, groundAt, cx, cz) : null;
+  if (flood) group.add(flood);
   const ringsOfItem = (item) => item.rings.map((ring) => ring.map(([lon, lat]) => project(lon, lat)));
   const props = (data.sheds?.length || data.seen?.length || data.after?.some((item) => item.draw === 'shed')) ? await streetPieces() : null;
   const place = labeler(streamer);
@@ -648,7 +666,7 @@ async function sceneGroup(streamer, url) {
     group.add(pinFor(streamer, item, place));
   }
   console.log(`[city-investigator] scene: ${data.markers?.length || 0} record pins, ${data.sheds?.length || 0} permitted sheds, ${data.seen?.length || 0} seen in the photo, ${data.facades?.length || 0} unsafe façades${data.flood ? ', flood' : ''}`);
-  group.add(await afterGroup(streamer, data.after || [], props, place, permitted));
+  group.add(await afterGroup(streamer, data.after || [], props, place, permitted, flood?.userData.nearM3 ?? null));
   return group;
 }
 

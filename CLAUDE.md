@@ -57,25 +57,32 @@ python -m city_investigator.web                            # the page, http://12
   (flood water, permitted sheds, scaffolding seen in the photo, unsafe façades, record pins, After view).
 - `batch.py`, `web.py`, `static/`: batch runs, the web page and the district overview.
 
-## Where things stand (Nov 3)
+## Where things stand (Nov 2, evening)
 
 Done and pushed: everything above, plus precedents, ideas from elsewhere (actions.py `IDEAS`, FloodNet as a
 flooding channel), and the framework figure (`docs/framework.svg` and `.png`, drawn by `docs/framework.py`; the
 README's "five ideas" A to E match its badges). 120 tests pass.
 
-Seen working in the owner's Valdrada: flood water, permitted sheds, the red façade wash, labels, record pins, a rain
-garden with its outline and the capacity label at Carroll St (1 garden, 8 m³, against 4,993 m³ of modeled flood
-within 150 m, 0.2%). The add-on reports its version; the page warns when Valdrada runs an older one. After any
+Seen working in the owner's Valdrada: flood water, permitted sheds, the red façade wash, labels, record pins, and
+at Carroll St in After (add-on 492970e30c, run 20261103-014844) 3 rain gardens placed of 5 possible spots, about
+23 m³ a storm against 5,362 m³ of modeled flood within 150 m (0.4%). The add-on reports its version; the page warns when Valdrada runs an older one. After any
 add-on change: run `valdrada_addon`, then restart Valdrada (Ctrl+C, `npm run dev`), then F5 the page.
 
-Nov 2 batch (before precedents and ideas): 26 sites, 8 where records and photo disagree, 259 of 259 claims kept,
-12 look-agains, about $2.17. Good sites for the video: Carroll St and 4th Ave (flood), 90 8th Ave (façades, sheds).
+Batch of Nov 2, 9:25 PM ET (with precedents and ideas): 26 sites, 8 where records and photo disagree, 276 of 276
+claims kept, 11 look-agains, about $2.38; 24 sites cite a precedent, 2 an idea from elsewhere. The morning batch is
+kept in `data/derived/batch-nov2-backup/`. Carroll St cites precedents and proposes the community board and rain
+gardens, no idea. Good sites for the video: Carroll St and 4th Ave (flood), 90 8th Ave (façades, sheds).
+
+Done on Nov 2 evening: README status line, `docs/submission.md` (description, five ideas, Meta tooling, credits, X
+post), the video script's batch numbers; precedents read "within a day" instead of "within 0 days" (121 tests). The
+framework figure was redrawn by gpt-6-astra (Codex 0.166.0 via `npx`; the installed 0.144.3 cannot use that model)
+at 1920×1080 with AI-generated pictures in `docs/figure/`; the owner will change it further and it is not committed.
+Do not copy photos from `data/private/` into the figure.
 
 Next, in order (deadline Nov 4, 9 PM ET; stop adding features):
-1. Owner: `python -m city_investigator.precedents` (check the numbers), then re-run the batch
-   (`batch --limit 3 --again`, all 26 sites: running only some topics would shrink the district overview), then
-   check Carroll St's answer cites precedents and maybe an idea, and how many rain gardens After places.
-2. Fill the video script's bracketed numbers (`docs/demo-video.md`); the owner records the 3-minute video.
-3. README status line (still says "Day 5"), the submission text (the five ideas), an X post.
-4. Only if time is left: a replay of a site's records over time with a marker per department; an AI-labeled
+1. Commit and merge into main, then re-explain 90 8th Ave from the main checkout (its answer says "within 0
+   days"): `python -m city_investigator.explain 1068641463659524`.
+2. The owner records the 3-minute video (real Valdrada screen for the 3D part, not the figure's pictures), fills
+   the X post's links, and submits.
+3. Only if time is left: a replay of a site's records over time with a marker per department; an AI-labeled
    "After" version of the photo with `muse-image-1.0`.

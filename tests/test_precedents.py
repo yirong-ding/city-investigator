@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 from city_investigator import explain, precedents
 from city_investigator.evidence import from_311
@@ -41,6 +42,12 @@ def test_reports_like_the_sites_come_first_with_how_they_ended(tmp_path):
     assert '"The Department of Environmental Protection inspected and found no problem." (100%)' in item["summary"]
     assert precedents.for_site("trees", set(), folder) == []  # no tree reports
     precedents.rows.cache_clear()
+
+
+def test_reports_closed_within_hours_read_within_a_day():
+    hours = precedents.Precedent("Sewer", "Street Flooding (SJ)", "street_flooding", 9, 9, 0.3, 2020, ())
+    assert "half of those within a day." in hours.item()["summary"]
+    assert "half of those within 1 day." in replace(hours, median_days=0.62).item()["summary"]
 
 
 def test_a_complaint_says_how_it_ended_and_precedents_reach_the_explanation(tmp_path, monkeypatch):

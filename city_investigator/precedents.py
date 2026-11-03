@@ -51,7 +51,8 @@ class Precedent:
         wording = self.complaint_type + (f" / {self.descriptor}" if self.descriptor else "")
         closed = f"{self.closed / self.reports:.0%} closed"
         if self.median_days is not None:
-            closed += f", half of those within {self.median_days:.0f} day{'s' if round(self.median_days) != 1 else ''}"
+            days = round(self.median_days)  # under half a day would round to "within 0 days"
+            closed += ", half of those within " + ("a day" if days == 0 else f"{days} day{'s' if days != 1 else ''}")
         outcomes = "; ".join(f'"{text}" ({count / self.reports:.0%})' for text, count in self.outcomes)
         return {
             "id": self.id,

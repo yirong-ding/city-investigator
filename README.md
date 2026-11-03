@@ -4,7 +4,7 @@
 
 Built for the Meta Global AI Developer Hackathon (Oct 26 to Nov 4, 2026).
 
-> **Status:** Day 5. Nine kinds of street problems, a web page that runs the whole investigation and streams each step, and an answer whose every claim links to its evidence on a map and a timeline. Findings so far are in [`smoke/FINDINGS.md`](smoke/FINDINGS.md).
+> **Status:** Ready for submission. Nine kinds of street problems, a web page that runs the whole investigation and streams each step, and an answer whose every claim links to its evidence on a map and a timeline. The latest district run covered 26 places: records and photo disagree at 8, and all 276 claims passed the checker, for about $2.38 in explanations. Findings are in [`smoke/FINDINGS.md`](smoke/FINDINGS.md).
 
 ![City Investigator's framework: a street photo and public records become evidence, Muse Spark reasons over it with tools and writes labeled claims a code checker verifies, and the result shows as an answer page, a 3D city before and after the proposals, and a district overview](docs/framework.svg)
 

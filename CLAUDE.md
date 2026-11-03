@@ -74,15 +74,14 @@ kept in `data/derived/batch-nov2-backup/`. Carroll St cites precedents and propo
 gardens, no idea. Good sites for the video: Carroll St and 4th Ave (flood), 90 8th Ave (façades, sheds).
 
 Done on Nov 2 evening: README status line, `docs/submission.md` (description, five ideas, Meta tooling, credits, X
-post), the video script's batch numbers; precedents read "within a day" instead of "within 0 days" (121 tests). The
+post), the video script's batch numbers; precedents read "within a day" instead of "within 0 days" (121 tests), merged into main, and 90 8th Ave
+re-explained with it (run 20261103-020153, 12 of 12 claims kept, $0.09). The
 framework figure was redrawn by gpt-6-astra (Codex 0.166.0 via `npx`; the installed 0.144.3 cannot use that model)
 at 1920×1080 with AI-generated pictures in `docs/figure/`; the owner will change it further and it is not committed.
 Do not copy photos from `data/private/` into the figure.
 
 Next, in order (deadline Nov 4, 9 PM ET; stop adding features):
-1. Commit and merge into main, then re-explain 90 8th Ave from the main checkout (its answer says "within 0
-   days"): `python -m city_investigator.explain 1068641463659524`.
-2. The owner records the 3-minute video (real Valdrada screen for the 3D part, not the figure's pictures), fills
+1. The owner records the 3-minute video (real Valdrada screen for the 3D part, not the figure's pictures), fills
    the X post's links, and submits.
-3. Only if time is left: a replay of a site's records over time with a marker per department; an AI-labeled
+2. Only if time is left: a replay of a site's records over time with a marker per department; an AI-labeled
    "After" version of the photo with `muse-image-1.0`.

@@ -37,6 +37,7 @@ const CURB_M = 8;      // a sidewalk is measured out to this width at most
 const SHED_DEPTH = 4.4;   // Valdrada's default shed depth, where the sidewalk cannot be measured
 const WALL_MIN = 2;    // meters: shorter walls get no shed
 const COLORS = { record: '#f2a900', photo: '#3d8bfd', unsafe: '#d92b2b', proposal: '#2b7a3d' };
+const TITLES = { [COLORS.proposal]: '#62d685' };   // a dark color's title in a lighter tone, to read on a label
 const GARDEN = [6, 1.5];   // meters along and across the curb: a curbside rain garden's size
 const GARDENS = 3;     // rain gardens shown around a low spot
 // What one curbside rain garden or bioswale holds in a storm: NYC DEP designs them for about 1,100 to 3,000 gallons
@@ -369,7 +370,7 @@ function wrap(text, width = 44, most = 3) {
 
 // A label over a piece: what it is, in its color, then where it comes from (wrapped).
 function label(lines, color, x, y, z) {
-  const rest = wrap(lines.slice(1).join(' '));
+  const rest = wrap(lines.slice(1).join(' '), 44, color === COLORS.proposal ? 4 : 3);   // a proposal's sentence whole
   const canvas = document.createElement('canvas');
   canvas.width = 1024;
   canvas.height = 108 + 64 * rest.length;
@@ -381,6 +382,7 @@ function label(lines, color, x, y, z) {
   g.font = 'bold 58px Arial, Helvetica, sans-serif';
   const room = canvas.width - 64, wide = g.measureText ? g.measureText(lines[0]).width : 0;
   if (wide > room) g.font = `bold ${Math.floor((58 * room) / wide)}px Arial, Helvetica, sans-serif`;   // a long title shrinks to fit
+  g.fillStyle = TITLES[color] ?? color;
   g.fillText(lines[0], 44, 78);
   g.fillStyle = '#ffffff';
   g.font = '44px Arial, Helvetica, sans-serif';
@@ -619,14 +621,18 @@ async function afterGroup(streamer, items, props, place, permitted, floodM3) {
       const open = walls.filter((w) => !shedded(permitted, w));
       for (const w of open) group.add(shedAlong(props, streamer, w, COLORS.proposal).group);
       const front = walls.sort((p, q) => q.length - p.length)[0];
-      note(item, front ? pastCurb(front) : [x, z], LABEL_Y, walls.length && !open.length ? 'Proposal (shed in place)' : undefined, front && alongWall(front));
+      if (walls.length && !open.length) {   // the permitted shed is the picture: its label goes over the permit's
+        note(item, pastCurb(front), LABEL_Y + 1.3, 'Proposal (shed in place)');
+      } else {
+        note(item, front ? pastCurb(front) : [x, z], LABEL_Y, undefined, front && alongWall(front));
+      }
     } else if (item.draw === 'young_tree') {
       const tree = youngTree();
       tree.position.set(x, surfaceY(streamer, x, z), z);
       group.add(tree);
       note(item, [x, z], 4);
     } else {
-      note(item, [x, z], LABEL_Y, item.idea ? 'Idea from elsewhere (not offered here yet)' : undefined);
+      note(item, [x, z], LABEL_Y, item.idea ? 'Idea from elsewhere (not offered here yet)' : 'Proposal');   // nothing drawn
     }
   }
   console.log(`[city-investigator] after: ${items.length} proposal(s): ${items.map((item) => item.draw || 'label').join(', ')}`);

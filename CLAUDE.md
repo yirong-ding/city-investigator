@@ -57,16 +57,25 @@ python -m city_investigator.web                            # the page, http://12
   (flood water, permitted sheds, scaffolding seen in the photo, unsafe façades, record pins, After view).
 - `batch.py`, `web.py`, `static/`: batch runs, the web page and the district overview.
 
-## Where things stand (Nov 2)
+## Where things stand (Nov 3)
 
-Done and pushed: everything above. Tested offline and in Node with stand-ins. Seen in the owner's Valdrada: the
-flood water, permitted sheds and the red façade wash (look right). Labels were out of frame and After duplicated a
-standing shed (fixed Nov 2, not yet seen again); record pins and rain gardens not yet seen there.
+Done and pushed: everything above, plus precedents, ideas from elsewhere (actions.py `IDEAS`, FloodNet as a
+flooding channel), and the framework figure (`docs/framework.svg` and `.png`, drawn by `docs/framework.py`; the
+README's "five ideas" A to E match its badges). 120 tests pass.
 
-Next, in order:
-1. Check the 3D layers in the owner's Valdrada (`scene3d` list, then screenshots of Before and After); fix what
-   they show.
-2. Video script and shot list (`docs/demo-video.md`), then the owner records.
-3. README status line and submission text; an X post.
+Seen working in the owner's Valdrada: flood water, permitted sheds, the red façade wash, labels, record pins, a rain
+garden with its outline and the capacity label at Carroll St (1 garden, 8 m³, against 4,993 m³ of modeled flood
+within 150 m, 0.2%). The add-on reports its version; the page warns when Valdrada runs an older one. After any
+add-on change: run `valdrada_addon`, then restart Valdrada (Ctrl+C, `npm run dev`), then F5 the page.
+
+Nov 2 batch (before precedents and ideas): 26 sites, 8 where records and photo disagree, 259 of 259 claims kept,
+12 look-agains, about $2.17. Good sites for the video: Carroll St and 4th Ave (flood), 90 8th Ave (façades, sheds).
+
+Next, in order (deadline Nov 4, 9 PM ET; stop adding features):
+1. Owner: `python -m city_investigator.precedents` (check the numbers), then re-run the batch
+   (`batch --limit 3 --again`, all 26 sites: running only some topics would shrink the district overview), then
+   check Carroll St's answer cites precedents and maybe an idea, and how many rain gardens After places.
+2. Fill the video script's bracketed numbers (`docs/demo-video.md`); the owner records the 3-minute video.
+3. README status line (still says "Day 5"), the submission text (the five ideas), an X post.
 4. Only if time is left: a replay of a site's records over time with a marker per department; an AI-labeled
    "After" version of the photo with `muse-image-1.0`.

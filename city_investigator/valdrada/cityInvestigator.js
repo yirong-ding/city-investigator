@@ -370,7 +370,8 @@ function wrap(text, width = 44, most = 3) {
 
 // A label over a piece: what it is, in its color, then where it comes from (wrapped).
 function label(lines, color, x, y, z) {
-  const rest = wrap(lines.slice(1).join(' '), 44, color === COLORS.proposal ? 4 : 3);   // a proposal's sentence whole
+  const proposal = color === COLORS.proposal;
+  const rest = wrap(lines.slice(1).join(' '), 44, proposal ? 5 : 3);   // a proposal's sentence whole
   const canvas = document.createElement('canvas');
   canvas.width = 1024;
   canvas.height = 108 + 64 * rest.length;
@@ -391,7 +392,11 @@ function label(lines, color, x, y, z) {
   texture.colorSpace = THREE.SRGBColorSpace;
   // fog off: Valdrada's fog chunks (world/materials.js) read a mesh's `transformed`, which a sprite's shader lacks, so a
   // fogged sprite fails to compile and is never drawn
-  const sprite = own(new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, toneMapped: false, fog: false })));
+  // a proposal's label, what After is for, is drawn over everything: tree crowns stand where it hangs, over a shed
+  const sprite = own(new THREE.Sprite(new THREE.SpriteMaterial({
+    map: texture, transparent: true, toneMapped: false, fog: false, depthTest: !proposal, depthWrite: !proposal,
+  })));
+  if (proposal) sprite.renderOrder = 10;
   sprite.scale.set(6.4, (6.4 * canvas.height) / canvas.width, 1);
   sprite.position.set(x, y + sprite.scale.y / 2, z);   // its foot at y
   return sprite;

@@ -32,13 +32,22 @@ The letters match the badges in the figure.
 
 Conflicts between sources and gaps in the records are flagged, not smoothed over.
 
+5. Under **What could be done**, each proposal names a real channel. One click and Muse Spark drafts the 311
+   description or the letter to send, from the checked claims only (every number in it must appear in them); you
+   read it, edit it and send it yourself. Another click and Muse Image redraws your photo with the proposals done,
+   such as curbside rain gardens at a flooded corner, keeping everything else, the water included. It is marked
+   as an AI illustration, not evidence.
+
+For a demo, open the page with `?demo` (http://127.0.0.1:8000/?demo): the space bar plays the video's shots one
+by one (`docs/demo-video.md`).
+
 ## Meta models
 
 | Model | Role |
 |---|---|
-| Muse Spark | Plans the investigation and writes the explanation |
+| Muse Spark | Plans the investigation and writes the explanation; drafts the 311 report or letter a proposal names (`draft.py`) |
 | SAM 3.1 | Segments the photo (water, scaffolding, curbs, catch basins) |
-| Muse Voice Transcribe | Spoken questions (planned) |
+| Muse Image | Redraws the photo with the proposals done, labeled an AI illustration, not evidence (`after_photo.py`) |
 | Muse Spark Open | Open-weight option for the explanation (`--provider open`, on Baseten) |
 
 ## Data

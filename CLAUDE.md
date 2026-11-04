@@ -41,7 +41,9 @@ python -m city_investigator.shortlist --topic trees        # sites worth investi
 python -m city_investigator.batch --limit 3 --again        # investigate 3 sites PER TOPIC (about 26), again
 python -m city_investigator.scene3d                        # newest run per site and what it draws in Valdrada (--all)
 python -m city_investigator.valdrada_addon G:\Projects\valdrada   # install or update the add-on, then RESTART Valdrada
-python -m city_investigator.web                            # the page, http://127.0.0.1:8000
+python -m city_investigator.web                            # the page, http://127.0.0.1:8000 (?demo: presenter mode)
+python -m city_investigator.after_photo latest             # Muse Image draws a run's proposals into its photo
+python -m city_investigator.draft latest 10                # Muse Spark drafts the proposal at claim 10 to send
 ```
 
 ## Map of the code
@@ -53,11 +55,15 @@ python -m city_investigator.web                            # the page, http://12
 - `investigate.py`, `explain.py`, `actions.py`: a run, Muse Spark's checked claims, and the vetted proposals.
 - `precedents.py`: how 311 reports like a site's ended across the district (share closed, days, outcomes).
 - `needs.py`: Gehl's 12 quality criteria each topic bears on.
+- `after_photo.py`: Muse Image (`muse-image-1.0`, `images.edit`, WebP back, about $0.01) redraws the run's blurred
+  photo with its proposals done; an AI illustration, never evidence; water kept; no shed where the photo shows one.
+- `draft.py`: Muse Spark drafts the 311 description or the letter a proposal names, from checked claims only
+  (numbers must appear in them, no promises, one repair); the resident sends it, nothing is sent from here.
 - `scene3d.py`, `valdrada/cityInvestigator.js`, `valdrada_addon.py`: the 3D scene and the Valdrada add-on
   (flood water, permitted sheds, scaffolding seen in the photo, unsafe façades, record pins, After view).
 - `batch.py`, `web.py`, `static/`: batch runs, the web page and the district overview.
 
-## Where things stand (Nov 2, evening)
+## Where things stand (Nov 4)
 
 Done and pushed: everything above, plus precedents, ideas from elsewhere (actions.py `IDEAS`, FloodNet as a
 flooding channel), and the framework figure (`docs/framework.svg` and `.png`, drawn by `docs/framework.py`; the
@@ -80,8 +86,13 @@ framework figure was redrawn by gpt-6-astra (Codex 0.166.0 via `npx`; the instal
 at 1920×1080 with AI-generated pictures in `docs/figure/`; the owner will change it further and it is not committed.
 Do not copy photos from `data/private/` into the figure.
 
+Done on Nov 4: After in the photo (Muse Image) and drafts to send (Muse Spark) under What could be done, and a
+presenter mode (`?demo`, space bar per shot; `DEMO_SITES` in web.py) that the video script follows (10 shots, about
+340 words). Tried on real runs: Carroll St's photo with 3 rain gardens (10.5 s), letters to CB6 and DEP's Green
+Infrastructure Program (29 to 51 s, no problems), a 311 draft at 431 Hicks St. In Valdrada, proposal labels draw
+over tree crowns with up to 5 lines (add-on 3b2601f592). 126 tests pass.
+
 Next, in order (deadline Nov 4, 9 PM ET; stop adding features):
-1. The owner records the 3-minute video (real Valdrada screen for the 3D part, not the figure's pictures), fills
-   the X post's links, and submits.
-2. Only if time is left: a replay of a site's records over time with a marker per department; an AI-labeled
-   "After" version of the photo with `muse-image-1.0`.
+1. Push main to GitHub (the public repo is what the judges see), with the figure once the owner is done with it.
+2. The owner records the 3-minute video in presenter mode (real Valdrada screen for the 3D part, not the figure's
+   pictures), fills the X post's links, and submits.

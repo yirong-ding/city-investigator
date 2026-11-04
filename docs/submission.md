@@ -12,7 +12,7 @@ Five ideas shape it:
 
 - **A. Records against reality.** The photo and the records are checked against each other: agree, disagree, or a gap, and every source says what it cannot see.
 - **B. Evidence, not guesses.** Muse Spark investigates with tools, and every claim must cite its evidence or a code checker drops it.
-- **C. Grounded proposals.** Next steps only through real channels, backed by how similar reports ended here, plus at most one sourced idea from elsewhere; no promises.
+- **C. Grounded proposals.** Next steps only through real channels, backed by how similar reports ended here, plus at most one sourced idea from elsewhere; no promises. Each comes with a draft to send, and Muse Image shows it done in the resident's own photo.
 - **D. Needs at stake.** Each finding is tagged with Jan Gehl's criteria: protection, comfort, enjoyment.
 - **E. An honest 3D twin.** The evidence placed in the city, and After shows proposals at their real scale, not a made-up prediction.
 
@@ -22,8 +22,9 @@ City Investigator is a research aid, not an official determination.
 
 ## Use of Meta AI tooling
 
-- **Muse Spark 1.3** plans the investigation, calls its tools (`check_photo`, `get_record`, `search_records`, `building_records`) and writes the labeled claims and proposals.
+- **Muse Spark 1.3** plans the investigation, calls its tools (`check_photo`, `get_record`, `search_records`, `building_records`) and writes the labeled claims and proposals. It then drafts the 311 report or letter each proposal names, from the checked claims only; a checker rejects any number that is not in them.
 - **SAM 3.1** segments each photo, and answers Muse Spark's follow-up checks, so a claim about the photo can be tested against what SAM 3.1 finds.
+- **Muse Image 1.0** redraws the resident's own photo with the proposals done (curbside rain gardens at a flooded corner, the shed an unsafe façade must have), keeping everything else, flood water included, and labeled as an AI illustration, not evidence.
 - **Muse Spark Open** is an open-weight option for the explanation (`--provider open`, on Baseten).
 
 ## Credits
@@ -32,4 +33,4 @@ Valdrada by Mehmet Kerem Turkcan (MIT; third-party, its code is not in this repo
 
 ## X post
 
-Street problems are recorded in a dozen places, and none of them sit next to what you can see. City Investigator checks a street photo against NYC's public records with SAM 3.1 and Muse Spark. Every claim cites its evidence, or a code checker drops it. [video link] [repo link]
+City Investigator checks a NYC street photo against public records with SAM 3.1 and Muse Spark, drafts the 311 report, and shows the fix in your own photo with Muse Image. Every claim cites its evidence, or a checker drops it. [video link] [repo link]

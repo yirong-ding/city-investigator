@@ -30,8 +30,9 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from city_investigator import batch, needs, valdrada_addon
-from city_investigator.explain import explain_run
+from city_investigator import after_photo, batch, draft, needs, valdrada_addon
+from city_investigator.explain import explain_run, find_run
+from city_investigator.meta import SpendCapError
 from city_investigator.geo import distance_m
 from city_investigator.investigate import OUTPUT, USER_UNCERTAINTY_M, investigate_photo, parse_local
 from city_investigator.photo_input import Photo, from_file, from_mapillary
@@ -45,7 +46,7 @@ from city_investigator.topics import TOPICS
 STATIC = Path(__file__).parent / "static"
 UPLOADS = ROOT / "data" / "private" / "uploads"
 PHOTO_TYPES = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"}
-RUN_FILES = {"photo.jpg", "overlay.png"}
+RUN_FILES = {"photo.jpg", "overlay.png", after_photo.FILE}
 MAP_HALF_M = 400  # flood model shown within this distance of the pin
 MAP_MAX_M = 1000  # records farther than this (the Central Park rain gauge) stay off the map
 GAUGE_HALF_M = 1.5  # the 3D column showing a sensor's deepest measured flood
@@ -71,6 +72,12 @@ DEMOS = [
         "when": "2026-08-23",
     },
 ]
+# The places the presenter mode (the page with ?demo) shows, by Mapillary photo; each opens its newest run.
+DEMO_SITES = {
+    "flood": "1385498442151420",  # Carroll St and 4th Ave
+    "disagree": "537647067273034",  # 431 Hicks St: a shed permit, no shed in the photo
+    "facade": "1068641463659524",  # 90 8th Ave: unsafe façade filings, permitted sheds
+}
 
 
 @dataclass
@@ -417,7 +424,44 @@ def create_app(state: State | None = None) -> FastAPI:
             record["group"] = group(record)
         result.setdefault("topic_label", TOPICS[result["topic"]].label if result["topic"] in TOPICS else result["topic"])
         result["needs"] = needs.for_topic(result["topic"])  # Gehl's quality criteria the topic bears on
-        return {"name": name, "result": result, "explanation": explanation, "map": map_layers(result, explanation, state.store)}
+        drawn = folder / after_photo.INFO
+        drafts = folder / draft.FILE
+        return {
+            "name": name, "result": result, "explanation": explanation, "map": map_layers(result, explanation, state.store),
+            "after_photo": json.loads(drawn.read_text()) if drawn.is_file() and (folder / after_photo.FILE).is_file() else None,
+            "after_photo_draws": after_photo.drawable(result, explanation),
+            "drafts": json.loads(drafts.read_text()) if drafts.is_file() else {},
+        }
+
+    @app.post("/api/runs/{name}/after-photo")
+    def draw_after(name: str) -> dict[str, Any]:
+        """Muse Image draws the run's proposals into its photo (about 10 s and a cent)."""
+        try:
+            return after_photo.draw_after(run_folder(name))
+        except (ValueError, SpendCapError) as error:
+            raise HTTPException(400, str(error)) from error
+
+    @app.post("/api/runs/{name}/drafts/{index}")
+    def write_draft(name: str, index: int) -> dict[str, Any]:
+        """Muse Spark drafts the 311 report or the letter of the proposal at `index` in the run's claims."""
+        folder = run_folder(name)
+        if not (folder / "explanation.json").is_file():
+            raise HTTPException(400, "This run has no explanation yet.")
+        try:
+            return draft.write_draft(folder, index)
+        except (ValueError, SpendCapError) as error:
+            raise HTTPException(400, str(error)) from error
+
+    @app.get("/api/demo")
+    def demo_runs() -> dict[str, str | None]:
+        """The newest run of each place the presenter mode shows."""
+        found: dict[str, str | None] = {}
+        for key, photo_id in DEMO_SITES.items():
+            try:
+                found[key] = find_run(photo_id).name
+            except SystemExit:
+                found[key] = None
+        return found
 
     @app.get("/api/runs/{name}/scene3d.json")
     def scene3d(name: str, scenario: str = "moderate_current") -> JSONResponse:

@@ -511,8 +511,10 @@ function renderAnswer(data, waiting) {
         cites.append(el('button', { type: 'button', class: 'chip', title: evidence.get(id)?.summary || id, text: shortName(id, evidence.get(id)), onclick: () => focusEvidence(id) }));
       }
       const idea = claim.kind === 'proposal' && claim.evidence_ids.some((id) => id.startsWith('idea:'));
+      const channel = claim.kind === 'proposal' && claim.evidence_ids.some((id) => id.startsWith('action:'));
       const item = el('li', { class: `claim kind-${claim.kind}${idea ? ' idea' : ''}`, tabindex: '0' },
-        el('span', { class: 'kind', text: idea ? 'IDEA FROM ELSEWHERE · NOT OFFERED HERE YET' : (KINDS[claim.kind] || claim.kind) }), el('p', { text: claim.text }), cites);
+        el('span', { class: 'kind', text: idea ? 'IDEA FROM ELSEWHERE · NOT OFFERED HERE YET' : (KINDS[claim.kind] || claim.kind) }), el('p', { text: claim.text }), cites,
+        channel && !idea ? draftBox(data, explanation.claims.indexOf(claim)) : null);
       hoverable(item, claim.evidence_ids);
       list.append(item);
     }
@@ -523,7 +525,7 @@ function renderAnswer(data, waiting) {
   if (proposals.length) {
     tab.append(el('h4', { class: 'proposals-head', text: 'What could be done' }),
       el('p', { class: 'meta proposals-note', text: 'Proposals from Muse Spark, each tied to a real channel and the evidence it answers. Not advice from the city.' }),
-      claimList(proposals));
+      claimList(proposals), afterPhoto(data));
   }
   if (explanation.models_disagree?.length) {
     tab.append(el('div', { class: 'box warn' }, el('strong', { text: 'Muse Spark and SAM 3.1 disagree' }),
@@ -547,6 +549,85 @@ function renderAnswer(data, waiting) {
       + `${explanation.repairs} repair round(s), ${explanation.tool_calls.length} lookup(s)`
       + (explanation.estimated_cost_usd !== undefined ? `, about $${explanation.estimated_cost_usd.toFixed(3)}.` : '.'),
   }));
+}
+
+// A proposal's ready-to-send text: Muse Spark drafts the 311 description or the letter from the checked claims, and
+// the resident reads, edits and sends it. Nothing is sent from the page.
+function draftBox(data, index) {
+  const box = el('div', { class: 'draft' });
+  const show = (saved) => {
+    const area = el('textarea', { rows: '9', 'aria-label': 'Draft to send' });
+    area.value = (saved.subject ? `${saved.subject}\n\n` : '') + saved.body;
+    const copy = el('button', { type: 'button', class: 'secondary', text: 'Copy' });
+    copy.addEventListener('click', () => navigator.clipboard.writeText(area.value).then(() => { copy.textContent = 'Copied'; }).catch(() => area.select()));
+    box.replaceChildren(
+      el('p', { class: 'meta', text: saved.kind === '311'
+        ? 'For a 311 report (portal.311.nyc.gov, the 311 app, or call 311): paste it as the description.'
+        : 'A letter to send yourself, by email or at a public meeting.' }),
+      area, copy,
+      saved.problems?.length ? el('p', { class: 'box warn', text: `Check before sending: ${saved.problems.join('; ')}` }) : null,
+      el('p', { class: 'meta', text: `Drafted by Muse Spark (${saved.model}) from the checked claims above in ${saved.seconds} s; `
+        + 'every number in it was checked against them. Read and edit it before you send it.' }));
+  };
+  const saved = data.drafts?.[String(index)];
+  if (saved) { show(saved); return box; }
+  const button = el('button', { type: 'button', class: 'secondary draft-write', text: 'Write it for me (Muse Spark)' });
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    button.textContent = 'Muse Spark is writing it from the checked claims…';
+    try {
+      const written = await api(`/api/runs/${encodeURIComponent(data.name)}/drafts/${index}`, { method: 'POST' });
+      data.drafts = { ...(data.drafts || {}), [String(index)]: written };
+      show(written);
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = 'Write it for me (Muse Spark)';
+      box.append(el('p', { class: 'status error', text: error.message }));
+    }
+  });
+  box.append(button);
+  return box;
+}
+
+// The proposals drawn into the resident's own photo by Muse Image: an illustration beside the photo, never evidence.
+function afterPhoto(data) {
+  if (!data.after_photo && !data.after_photo_draws?.length) return null;
+  const box = el('div', { class: 'after-photo', id: 'after-photo' }, el('h4', { text: 'The proposals, drawn into the photo' }));
+  const file = (name) => `/api/runs/${encodeURIComponent(data.name)}/files/${name}`;
+  const show = (info) => {
+    const image = el('img', { src: `${file(info.file)}?v=${info.seconds}`, alt: 'The photo with the proposals drawn in by Muse Image, an AI illustration' });
+    const toggle = el('div', { class: 'toggle' });
+    const choose = (src, button) => {
+      image.src = src;
+      for (const other of toggle.children) other.classList.toggle('on', other === button);
+    };
+    const after = el('button', { type: 'button', class: 'on', text: 'After (Muse Image)' });
+    const before = el('button', { type: 'button', text: 'The photo' });
+    after.addEventListener('click', () => choose(`${file(info.file)}?v=${info.seconds}`, after));
+    before.addEventListener('click', () => choose(file('photo.jpg'), before));
+    toggle.append(after, before);
+    box.replaceChildren(box.firstChild,
+      el('figure', { class: 'after-figure' }, image, el('span', { class: 'ai-badge', text: 'AI illustration · not evidence' })),
+      toggle,
+      el('p', { class: 'meta', text: `${info.note} ${info.credit}.` }));
+  };
+  if (data.after_photo) { show(data.after_photo); return box; }
+  const button = el('button', { type: 'button', class: 'secondary after-draw', text: 'Draw them into the photo (Muse Image)' });
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    button.textContent = 'Muse Image is drawing the proposals into the photo…';
+    try {
+      const info = await api(`/api/runs/${encodeURIComponent(data.name)}/after-photo`, { method: 'POST' });
+      data.after_photo = info;
+      show(info);
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = 'Draw them into the photo (Muse Image)';
+      box.append(el('p', { class: 'status error', text: error.message }));
+    }
+  });
+  box.append(el('p', { class: 'meta', text: 'Muse Image can redraw this photo with the proposals done, as an illustration: everything else, and any water, kept.' }), button);
+  return box;
 }
 
 function renderFlags(data) {
@@ -895,6 +976,91 @@ async function loadRun(name, { waiting = false } = {}) {
   if (document.querySelector('.stage').dataset.view === 'valdrada') showStage('valdrada');  // follow the new spot
 }
 
+// Presenter mode (the page opened with ?demo): the video's shots in order (docs/demo-video.md), one per press of the
+// space bar or →, so the screen follows the voice-over; ← plays the shot before again, H hides the shot counter.
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function flash(node) {
+  if (!node) return;
+  node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  node.classList.add('flash');
+  setTimeout(() => node.classList.remove('flash'), 2500);
+}
+
+// The first claim that cites a flag, else the first claim: hovered, so the map and the timeline light up.
+function showClaim() {
+  const claims = state.run?.explanation?.claims || [];
+  const claim = claims.find((item) => item.evidence_ids.some((id) => id.startsWith('flag:'))) || claims[0];
+  if (!claim) return;
+  const node = [...document.querySelectorAll('#tab-answer .claim')][claims.filter((item) => item.kind !== 'proposal').indexOf(claim)];
+  highlight(claim.evidence_ids);
+  flash(node);
+}
+
+const SHOTS = [
+  ['The flooded corner in 3D', async (runs) => { await loadRun(runs.flood); showStage('valdrada'); }],
+  ['A photo and a question', async () => {
+    showStage('map');
+    [...document.querySelectorAll('#demos button')].find((button) => button.textContent.startsWith('Flooding'))?.click();
+    $('step-photo').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }],
+  ['The investigation, live', async () => { $('investigate').click(); }],
+  ['Where records and photo disagree', async (runs) => {
+    await loadRun(runs.disagree);
+    showStage('map');
+    selectTab('answer');
+    await wait(600);
+    showClaim();
+  }],
+  ['The flags and the needs at stake', async () => { selectTab('flags'); $('results').scrollIntoView({ behavior: 'smooth', block: 'start' }); }],
+  ['The same place in 3D', async (runs) => { await loadRun(runs.facade); showStage('valdrada'); }],
+  ['What could be done, and After', async (runs) => {
+    await loadRun(runs.flood);
+    showStage('valdrada');
+    selectTab('answer');
+    $('tab-answer').querySelector('.proposals-head')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    await wait(1500);
+    setAfter(true);
+  }],
+  ['After, in the photo (Muse Image)', async () => {
+    const box = $('after-photo');
+    box?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    box?.querySelector('.after-draw')?.click();
+  }],
+  ['A report to send (Muse Spark)', async () => {
+    const draft = document.querySelector('#tab-answer .draft');
+    draft?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    draft?.querySelector('.draft-write')?.click();
+  }],
+  ['The district', async () => { setAfter(false); await showOverview(); $('overview-card').scrollIntoView({ behavior: 'smooth', block: 'start' }); }],
+];
+
+function startPresenter() {
+  let shot = -1, busy = false;
+  const badge = el('div', { class: 'shot-badge', text: `Presenter mode: space for the first of ${SHOTS.length} shots` });
+  document.body.append(badge);
+  const play = async (next) => {
+    if (busy || next < 0 || next >= SHOTS.length) return;
+    busy = true;
+    shot = next;
+    const [title, run] = SHOTS[shot];
+    badge.textContent = `Shot ${shot + 1} of ${SHOTS.length}: ${title}`;
+    try {
+      await run(await api('/api/demo'));  // the newest run of each place: a live run of the flood corner replaces it
+    } catch (error) {
+      badge.textContent = `Shot ${shot + 1}: ${error.message}`;
+    }
+    busy = false;
+  };
+  addEventListener('keydown', (event) => {
+    if (event.target.closest?.('input, textarea, select')) return;
+    if (event.key === ' ' || event.key === 'ArrowRight') { event.preventDefault(); play(shot + 1); }
+    else if (event.key === 'ArrowLeft') play(Math.max(0, shot - 1));
+    else if (event.key.toLowerCase() === 'h') badge.hidden = !badge.hidden;
+  });
+}
+
 // Bringing in a photo
 
 function setStatus(text, isError = false) {
@@ -996,6 +1162,7 @@ async function init() {
   $('overview').hidden = !overview;
   if (fromLink) loadRun(fromLink).catch(() => {});
   else if (overview && location.hash === '#overview') showOverview().catch(() => {});
+  if (new URLSearchParams(location.search).has('demo')) startPresenter();
 }
 
 init();

@@ -560,14 +560,15 @@ function draftBox(data, index) {
     area.value = (saved.subject ? `${saved.subject}\n\n` : '') + saved.body;
     const copy = el('button', { type: 'button', class: 'secondary', text: 'Copy' });
     copy.addEventListener('click', () => navigator.clipboard.writeText(area.value).then(() => { copy.textContent = 'Copied'; }).catch(() => area.select()));
-    box.replaceChildren(
+    box.replaceChildren(...[
       el('p', { class: 'meta', text: saved.kind === '311'
         ? 'For a 311 report (portal.311.nyc.gov, the 311 app, or call 311): paste it as the description.'
         : 'A letter to send yourself, by email or at a public meeting.' }),
       area, copy,
       saved.problems?.length ? el('p', { class: 'box warn', text: `Check before sending: ${saved.problems.join('; ')}` }) : null,
       el('p', { class: 'meta', text: `Drafted by Muse Spark (${saved.model}) from the checked claims above in ${saved.seconds} s; `
-        + 'every number in it was checked against them. Read and edit it before you send it.' }));
+        + 'every number in it was checked against them. Read and edit it before you send it.' }),
+    ].filter(Boolean));
   };
   const saved = data.drafts?.[String(index)];
   if (saved) { show(saved); return box; }
@@ -1139,6 +1140,7 @@ async function init() {
   for (const button of document.querySelectorAll('#after-switch button')) button.addEventListener('click', () => setAfter(button.dataset.after === '1'));
   let resize;
   window.addEventListener('resize', () => { clearTimeout(resize); resize = setTimeout(() => state.run && renderTimeline(state.run), 150); });
+  if (new URLSearchParams(location.search).has('demo')) startPresenter();
 
   const topics = await api('/api/topics').catch(() => []);
   $('topic').replaceChildren(el('option', { value: '', text: 'From the question' }),
@@ -1162,7 +1164,6 @@ async function init() {
   $('overview').hidden = !overview;
   if (fromLink) loadRun(fromLink).catch(() => {});
   else if (overview && location.hash === '#overview') showOverview().catch(() => {});
-  if (new URLSearchParams(location.search).has('demo')) startPresenter();
 }
 
 init();

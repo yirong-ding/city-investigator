@@ -4,7 +4,9 @@
 
 Built for the Meta Global AI Developer Hackathon (Oct 26 to Nov 4, 2026).
 
-> **Status:** Ready for submission. Nine kinds of street problems, a web page that runs the whole investigation and streams each step, and an answer whose every claim links to its evidence on a map and a timeline. The latest district run covered 26 places: records and photo disagree at 8, and all 276 claims passed the checker, for about $2.38 in explanations. Findings are in [`smoke/FINDINGS.md`](smoke/FINDINGS.md).
+> **Status:** Ready for submission. Nine kinds of street problems, a web page that runs the whole investigation and streams each step, and an answer whose every claim links to its evidence on a map and a timeline. The latest district run covered 26 places: records and photo disagree at 8, all 276 claims passed the checker, and Muse Spark asked SAM 3.1 to look again 11 times, for about $2.38 in explanations. 126 offline tests pass. Findings are in [`smoke/FINDINGS.md`](smoke/FINDINGS.md).
+
+> **Demo video (3 min):** submitted with the entry; its script and shot list are in [`docs/demo-video.md`](docs/demo-video.md). The write-up for the judges is [`docs/submission.md`](docs/submission.md).
 
 ![City Investigator's framework: a street photo and public records become evidence, Muse Spark reasons over it with tools and writes labeled claims a code checker verifies, and the result shows as an answer page, a 3D city before and after the proposals, and a district overview](docs/framework.svg)
 
@@ -29,14 +31,13 @@ The letters match the badges in the figure.
    - **Modeled** by a city flood map
    - **Inferred** by the agent, with the evidence it rests on
    - **No coverage** where no dataset could have seen anything
-
-Conflicts between sources and gaps in the records are flagged, not smoothed over.
-
 5. Under **What could be done**, each proposal names a real channel. One click and Muse Spark drafts the 311
    description or the letter to send, from the checked claims only (every number in it must appear in them); you
    read it, edit it and send it yourself. Another click and Muse Image redraws your photo with the proposals done,
    such as curbside rain gardens at a flooded corner, keeping everything else, the water included. It is marked
    as an AI illustration, not evidence.
+
+Conflicts between sources and gaps in the records are flagged, not smoothed over.
 
 For a demo, open the page with `?demo` (http://127.0.0.1:8000/?demo): the space bar plays the video's shots one
 by one (`docs/demo-video.md`).
@@ -45,14 +46,14 @@ by one (`docs/demo-video.md`).
 
 | Model | Role |
 |---|---|
-| Muse Spark | Plans the investigation and writes the explanation; drafts the 311 report or letter a proposal names (`draft.py`) |
-| SAM 3.1 | Segments the photo (water, scaffolding, curbs, catch basins) |
-| Muse Image | Redraws the photo with the proposals done, labeled an AI illustration, not evidence (`after_photo.py`) |
-| Muse Spark Open | Open-weight option for the explanation (`--provider open`, on Baseten) |
+| Muse Spark 1.3 (`muse-spark-1.3`) | Plans the investigation with tools, writes the answer as labeled claims under a strict JSON schema (`explain.py`), and drafts the 311 report or letter a proposal names (`draft.py`) |
+| SAM 3.1 (`sam-3.1`) | Blurs faces and license plates first, segments the photo (water, scaffolding, curbs, catch basins), and looks again when Muse Spark asks (`segment.py`) |
+| Muse Image 1.0 (`muse-image-1.0`) | Redraws the photo with the proposals done, labeled an AI illustration, not evidence (`after_photo.py`) |
+| Muse Spark Open (`meta-models/muse-spark-open-1026`) | Open-weight option for the explanation (`--provider open`, on Baseten) |
 
 ## Data
 
-NYC Open Data (311 service requests, PLUTO property data, Department of Buildings permits), FloodNet street flooding sensors (New York University and The City University of New York), hourly rain at the Central Park weather station, and the [NYC Stormwater Flood Maps](https://data.cityofnewyork.us/d/9i7c-xyvv) from the Mayor's Office of Climate and Environmental Justice. Sources are credited in the app.
+NYC Open Data (311 service requests, PLUTO property data, Department of Buildings permits), FloodNet street flooding sensors (New York University and The City University of New York), hourly rain at the Central Park weather station (Iowa Environmental Mesonet), and the [NYC Stormwater Flood Maps](https://data.cityofnewyork.us/d/9i7c-xyvv) from the Mayor's Office of Climate and Environmental Justice. Sources are credited in the app.
 
 [Building footprints](https://data.cityofnewyork.us/d/5zhs-2jue) give each building's roof height and the ground elevation it stands on. A flood investigation compares the ground at the pin with the buildings within 200 m: a spot lower than its blocks collects their runoff; one higher than them that still floods points to drains rather than terrain.
 
@@ -69,7 +70,7 @@ cp .env.example .env   # then fill in your keys
 python -m pytest tests # offline checks, no key needed
 ```
 
-Then run the [Day 1 smoke tests](smoke/README.md).
+Then `python -m smoke.check_env` checks your keys and that the Meta models answer; the other [smoke tests](smoke/README.md) exercise each service.
 
 ## Topics
 

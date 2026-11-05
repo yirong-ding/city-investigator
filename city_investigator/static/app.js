@@ -667,7 +667,7 @@ function renderPhoto(data) {
     photo.credit ? el('p', { class: 'meta' }, photo.page_url ? el('a', { href: photo.page_url, target: '_blank', rel: 'noopener', text: photo.credit }) : photo.credit) : null,
     el('p', { class: 'meta' },
       el('a', { href: valdradaLink(valdradaPlace(data.map), VALDRADA), target: '_blank', rel: 'noopener', text: 'See this spot in Valdrada' }),
-      ', the 3D city of New York, when it runs on this computer. Its streets are built from public records, but some '
+      ', a 3D city of New York, when it runs on this computer. Its streets are built from public records, but some '
       + 'details such as sidewalk sheds are placed at random, so it shows the place, not the evidence.'));
 }
 

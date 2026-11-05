@@ -80,10 +80,10 @@ kept in `data/derived/batch-nov2-backup/`. Carroll St cites precedents and propo
 gardens, no idea. Good sites for the video: Carroll St and 4th Ave (flood), 90 8th Ave (façades, sheds).
 
 Done on Nov 2 evening: README status line, `docs/submission.md` (description, five ideas, Meta tooling, credits, X
-post), the video script's batch numbers; precedents read "within a day" instead of "within 0 days" (121 tests), merged into main, and 90 8th Ave
-re-explained with it (run 20261103-020153, 12 of 12 claims kept, $0.09). The
+post), the video script's batch numbers; precedents read "within a day" instead of "within 0 days" (121 tests),
+merged into main, and 90 8th Ave re-explained with it (run 20261103-020153, 12 of 12 claims kept, $0.09). The
 framework figure was redrawn by gpt-6-astra (Codex 0.166.0 via `npx`; the installed 0.144.3 cannot use that model)
-at 1920×1080 with AI-generated pictures in `docs/figure/`; the owner will change it further and it is not committed.
+at 1920×1080 with AI-generated pictures in `docs/figure/` (committed on Nov 4).
 Do not copy photos from `data/private/` into the figure.
 
 Done on Nov 4: After in the photo (Muse Image) and drafts to send (Muse Spark) under What could be done, and a
@@ -92,7 +92,9 @@ presenter mode (`?demo`, space bar per shot; `DEMO_SITES` in web.py) that the vi
 Infrastructure Program (29 to 51 s, no problems), a 311 draft at 431 Hicks St. In Valdrada, proposal labels draw
 over tree crowns with up to 5 lines (add-on 3b2601f592). 126 tests pass.
 
-Next, in order (deadline Nov 4, 9 PM ET; stop adding features):
-1. Push main to GitHub (the public repo is what the judges see), with the figure once the owner is done with it.
-2. The owner records the 3-minute video in presenter mode (real Valdrada screen for the 3D part, not the figure's
-   pictures), fills the X post's links, and submits.
+Status at submission (Nov 4, evening): main is pushed to github.com/yirong-ding/city-investigator with the figure;
+the 3-minute video was recorded in presenter mode with a synthetic voice and burned-in captions (cover, the
+figure's parts highlighted in turn, then the shots; a 2.5% speed-up keeps it under 3:00); 126 tests pass. The
+owner submits on the Cerebral Valley portal. After the hackathon, the ideas not built: a replay of a site's
+records over time with a marker per department, and photos over time (SAM 3.1 on every Mapillary photo of a spot,
+laid against the permits).
